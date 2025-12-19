@@ -451,3 +451,42 @@ body{ background: var(--bg); color: var(--text); }
   color: var(--text);
   border: 1px solid var(--border);
 }
+/* ===== MOBILE FIX (final override) ===== */
+@media (max-width: 680px){
+  /* استخدم نفس الحاوية الفعلية */
+  .app-shell{
+    flex-direction: column !important;
+  }
+
+  /* اجعل المحتوى يأخذ كامل العرض */
+  .main{
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 12px 12px 96px 12px !important; /* مساحة لأسفل (Bottom Nav) */
+  }
+
+  /* تأكد أن السايدبار يتحول إلى Bottom Nav فعلاً */
+  .sidebar{
+    position: fixed !important;
+    bottom: 0 !important;
+    top: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 74px !important;
+    padding: 10px !important;
+    border-left: 0 !important;
+    border-top: 1px solid var(--border) !important;
+    z-index: 9999 !important;
+    background: rgba(244,246,251,.92) !important;
+    backdrop-filter: blur(12px);
+  }
+
+  /* نفس إعدادات الـ bottom nav اللي عندك */
+  .brand{display:none !important;}
+  .nav-list{flex-direction: row !important; gap: 8px !important; justify-content: space-between !important;}
+  .nav-link{flex:1 !important; justify-content:center !important; padding:8px !important; border-radius:16px !important;}
+  .nav-text{display:none !important;}
+  .nav-icon{width:44px !important; height:44px !important; border-radius:16px !important;}
+  .nav-version{display:none !important;}
+}
