@@ -63,19 +63,10 @@ export default function Ledger() {
   // ===== Giga Reports (قراءات الجيجا) =====
   const [gigaLoading, setGigaLoading] = useState(false);
   const [gigaRows, setGigaRows] = useState([]); // flat rows per invoice line
-  const [gigaSummary, setGigaSummary] = useState({ invoices: 0, customers: 0, usage: 0, amount: 0 });
   const [gigaCustomerId, setGigaCustomerId] = useState("all");
   const [gigaQ, setGigaQ] = useState("");
 
-  
-  const gigaFilteredRows = useMemo(()=>{
-  const rows = gigaRows || [];
-    const s = String(gigaQ||"").trim().toLowerCase();
-    if(!s) return rows;
-    return rows.filter(r => (r.customer_name||"").toLowerCase().includes(s) || String(r.invoice_id||"").includes(s));
-  }, [gigaRows, gigaQ]);
-
-// ===== Card Moves =====
+  // ===== Card Moves =====
   const [loading, setLoading] = useState(false);
   const [moves, setMoves] = useState([]);
   const [cardTypes, setCardTypes] = useState([]);
@@ -108,7 +99,7 @@ export default function Ledger() {
   async function loadCustomers() {
     const { data, error } = await supabase
       .from("customers")
-      .select("id,name,type,opening_balance,phone,address,notes,created_at")
+      .select("id,name,type,opening_balance,phone,address,notes,created_at,price_per_gb,last_reading_gb")
       .order("name", { ascending: true });
     if (error) throw error;
     setCustomers(data || []);
@@ -174,184 +165,9 @@ export default function Ledger() {
     }
   }
 
-  // normalize card moves (View or Table)
+  // normalize card moves (View or Table)  ✅ مهم: هذا كان مخرب بالنسخة السابقة (اختلاط الأقواس داخل useMemo)
   const normalizedMoves = useMemo(() => {
-    
-  async function loadGigaReport(){
-    setGigaLoading(true);
-    try{
-      // 1) invoices (giga only) in date range
-      let qInv = supabase
-        .from("invoices")
-        .select("id,invoice_date,customer_id,invoice_type,total_after_discount,paid_amount,remaining_amount,created_at")
-        .eq("invoice_type","giga")
-        .gte("invoice_date", from)
-        .lte("invoice_date", to)
-        .order("invoice_date", { ascending: true });
-
-      if(gigaCustomerId !== "all"){
-        qInv = qInv.eq("customer_id", gigaCustomerId);
-      }
-
-      const { data: invs, error: eInv } = await qInv;
-      if(eInv) throw eInv;
-
-      const invoiceIds = (invs || []).map(x=>Number(x.id)).filter(Boolean);
-      if(invoiceIds.length === 0){
-        setGigaRows([]);
-        setGigaSummary({ invoices: 0, customers: 0, usage: 0, amount: 0 });
-        return;
-      }
-
-      // 2) lines (usage only)
-      const { data: lines, error: eLines } = await supabase
-        .from("invoice_line_items")
-        .select("invoice_id,prev_reading_gb,curr_reading_gb,usage_gb,price_per_gb,line_total")
-        .in("invoice_id", invoiceIds);
-
-      if(eLines) throw eLines;
-
-      // 3) customers map
-      const custIds = Array.from(new Set((invs||[]).map(x=>Number(x.customer_id)).filter(Boolean)));
-      const { data: custs, error: eCust } = await supabase
-        .from("customers")
-        .select("id,name,type,price_per_gb,last_reading_gb")
-        .in("id", custIds);
-      if(eCust) throw eCust;
-
-      const custMap = new Map((custs||[]).map(c=>[Number(c.id), c]));
-      const invMap = new Map((invs||[]).map(i=>[Number(i.id), i]));
-
-      // flat rows
-      let rows = (lines||[])
-        .filter(l => l.usage_gb !== null && l.usage_gb !== undefined)
-        .map((l, idx) => {
-          const inv = invMap.get(Number(l.invoice_id)) || {};
-          const cust = custMap.get(Number(inv.customer_id)) || {};
-          const prev = safeNum(l.prev_reading_gb);
-          const curr = safeNum(l.curr_reading_gb);
-          const usage = safeNum(l.usage_gb ?? Math.max(0, curr - prev));
-          const ppg = safeNum(l.price_per_gb ?? cust.price_per_gb ?? 0);
-          const total = safeNum(l.line_total ?? usage * ppg);
-          return {
-            key: `${l.invoice_id}-${idx}`,
-            invoice_id: Number(l.invoice_id),
-            invoice_date: inv.invoice_date || (inv.created_at ? String(inv.created_at).slice(0,10) : ""),
-            customer_id: Number(inv.customer_id || 0),
-            customer_name: cust.name || "",
-            prev_reading_gb: prev,
-            curr_reading_gb: curr,
-            usage_gb: usage,
-            price_per_gb: ppg,
-            line_total: total,
-          };
-        });
-
-      if(gigaQ){
-        const s = String(gigaQ).toLowerCase();
-        rows = rows.filter(r => (r.customer_name||"").toLowerCase().includes(s) || String(r.invoice_id).includes(s));
-      }
-
-      const invCount = new Set(rows.map(r=>r.invoice_id)).size;
-      const custCount = new Set(rows.map(r=>r.customer_id)).size;
-      const usageSum = rows.reduce((a,r)=>a+safeNum(r.usage_gb),0);
-      const amountSum = rows.reduce((a,r)=>a+safeNum(r.line_total),0);
-
-      setGigaRows(rows);
-      setGigaSummary({ invoices: invCount, customers: custCount, usage: usageSum, amount: amountSum });
-    }catch(err){
-      console.error(err);
-      alert("تعذر تحميل تقرير الجيجا");
-    }finally{
-      setGigaLoading(false);
-    }
-  }
-
-  function printGigaReport(){
-    const rows = gigaFilteredRows || gigaRows || [];
-    const title = "تقرير الجيجا";
-    const hdr = `
-      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
-        <div>
-          <div style="font-weight:800;font-size:18px;margin-bottom:4px;">${title}</div>
-          <div style="color:#666;font-size:12px;">الفترة: ${from} → ${to}</div>
-        </div>
-        <div style="text-align:left;color:#666;font-size:12px;">طباعة: ${new Date().toLocaleString()}</div>
-      </div>
-      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;" />
-      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#333;">
-        <div>عدد الفواتير: <b>${gigaSummary.invoices}</b></div>
-        <div>عدد العملاء: <b>${gigaSummary.customers}</b></div>
-        <div>إجمالي الاستهلاك (GB): <b>${money(gigaSummary.usage)}</b></div>
-        <div>إجمالي المبلغ: <b>${money(gigaSummary.amount)}</b></div>
-      </div>
-    `;
-    const table = `
-      <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;">
-        <thead>
-          <tr>
-            <th style="border:1px solid #ddd;padding:6px;">#</th>
-            <th style="border:1px solid #ddd;padding:6px;">التاريخ</th>
-            <th style="border:1px solid #ddd;padding:6px;">العميل</th>
-            <th style="border:1px solid #ddd;padding:6px;">فاتورة</th>
-            <th style="border:1px solid #ddd;padding:6px;">قراءة سابقة</th>
-            <th style="border:1px solid #ddd;padding:6px;">قراءة حالية</th>
-            <th style="border:1px solid #ddd;padding:6px;">استهلاك</th>
-            <th style="border:1px solid #ddd;padding:6px;">سعر الجيجا</th>
-            <th style="border:1px solid #ddd;padding:6px;">الإجمالي</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((r,i)=>`
-            <tr>
-              <td style="border:1px solid #ddd;padding:6px;">${i+1}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.invoice_date||""}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.customer_name||""}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td>
-              <td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `;
-
-    const html = `
-      <html lang="ar" dir="rtl">
-        <head>
-          <meta charset="UTF-8" />
-          <title>${title}</title>
-          <style>
-            body{ font-family: Arial, sans-serif; padding:16px; }
-            @media print { .no-print{ display:none !important; } }
-          </style>
-        </head>
-        <body>
-          ${hdr}
-          ${table}
-          <script>window.onload=function(){ window.print(); };</script>
-        </body>
-      </html>
-    `;
-    const w = window.open("", "_blank");
-    if(!w) return alert("المتصفح منع نافذة الطباعة");
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-  }
-
-  // auto reload on tab/filters
-  useEffect(()=>{
-    if(tab === "giga"){
-      loadGigaReport();
-    }
-    // eslint-disable-next-line
-  }, [tab, from, to, gigaCustomerId]);
-
-return (moves || []).map((r) => {
+    return (moves || []).map((r) => {
       const cardName = pick(r, ["card_name", "card_type_name", "name"], "") || pick(r?.card_types, ["name"], "-");
 
       const invoiceNo =
@@ -389,7 +205,7 @@ return (moves || []).map((r) => {
   const filteredMoves = useMemo(() => {
     const s = String(q || "").trim().toLowerCase();
     if (!s) return normalizedMoves;
-    return normalizedMoves.filter((r) => {
+    return (normalizedMoves || []).filter((r) => {
       const a = (r.card_name || "").toLowerCase();
       const b = (r.note || "").toLowerCase();
       const c = (r.invoice_no || "").toLowerCase();
@@ -402,7 +218,7 @@ return (moves || []).map((r) => {
   const totalsMoves = useMemo(() => {
     let inQty = 0;
     let outQty = 0;
-    for (const r of filteredMoves) {
+    for (const r of filteredMoves || []) {
       if (String(r.movement_type) === "IN") inQty += safeNum(r.qty);
       if (String(r.movement_type) === "OUT") outQty += safeNum(r.qty);
     }
@@ -413,7 +229,7 @@ return (moves || []).map((r) => {
   const itemSummaryRows = useMemo(() => {
     // نجمع من filteredMoves حسب الصنف
     const byId = new Map(); // card_type_id -> summary
-    for (const m of filteredMoves) {
+    for (const m of filteredMoves || []) {
       const id = String(m.card_type_id ?? "");
       if (!id) continue;
       if (!byId.has(id)) {
@@ -519,7 +335,7 @@ return (moves || []).map((r) => {
 
   function expandLedgerWithDetails(baseRows, detailsMap) {
     const out = [];
-    for (const r of baseRows) {
+    for (const r of baseRows || []) {
       out.push(r);
 
       const isInvoice = String(r.kind || "").includes("فاتورة");
@@ -557,7 +373,7 @@ return (moves || []).map((r) => {
       const toTs = `${toPlus1}T00:00:00`;
 
       const cid = Number(custId);
-      const cust = customers.find((c) => Number(c.id) === cid);
+      const cust = (customers || []).find((c) => Number(c.id) === cid);
       const opening = safeNum(cust?.opening_balance);
 
       // 1) try view first (if exists)
@@ -669,7 +485,7 @@ return (moves || []).map((r) => {
 
   const selectedCustomer = useMemo(() => {
     if (!custId) return null;
-    return customers.find((c) => String(c.id) === String(custId)) || null;
+    return (customers || []).find((c) => String(c.id) === String(custId)) || null;
   }, [customers, custId]);
 
   const ledgerFiltered = useMemo(() => {
@@ -687,7 +503,7 @@ return (moves || []).map((r) => {
   const ledgerSummary = useMemo(() => {
     let debit = 0;
     let credit = 0;
-    for (const r of ledgerFiltered) {
+    for (const r of ledgerFiltered || []) {
       debit += safeNum(r.debit);
       credit += safeNum(r.credit);
     }
@@ -695,6 +511,188 @@ return (moves || []).map((r) => {
     const closing = opening + debit - credit;
     return { debit, credit, opening, closing };
   }, [ledgerFiltered, selectedCustomer]);
+
+  // ===================== Giga Report =====================
+  const gigaFilteredRows = useMemo(() => {
+    const rows = gigaRows || [];
+    const s = String(gigaQ || "").trim().toLowerCase();
+    if (!s) return rows;
+    return rows.filter(
+      (r) => (r.customer_name || "").toLowerCase().includes(s) || String(r.invoice_id || "").includes(s)
+    );
+  }, [gigaRows, gigaQ]);
+
+  const gigaSummary = useMemo(() => {
+    const rows = gigaFilteredRows || [];
+    const invCount = new Set(rows.map((r) => r.invoice_id)).size;
+    const custCount = new Set(rows.map((r) => r.customer_id)).size;
+    const usageSum = rows.reduce((a, r) => a + safeNum(r.usage_gb), 0);
+    const amountSum = rows.reduce((a, r) => a + safeNum(r.line_total), 0);
+    return { invoices: invCount, customers: custCount, usage: usageSum, amount: amountSum };
+  }, [gigaFilteredRows]);
+
+  async function loadGigaReport() {
+    setGigaLoading(true);
+    try {
+      // 1) invoices (giga only) in date range
+      let qInv = supabase
+        .from("invoices")
+        .select("id,invoice_date,customer_id,invoice_type,total_after_discount,paid_amount,remaining_amount,created_at")
+        .eq("invoice_type", "giga")
+        .gte("invoice_date", from)
+        .lte("invoice_date", to)
+        .order("invoice_date", { ascending: true });
+
+      if (gigaCustomerId !== "all") qInv = qInv.eq("customer_id", gigaCustomerId);
+
+      const { data: invs, error: eInv } = await qInv;
+      if (eInv) throw eInv;
+
+      const invoiceIds = (invs || []).map((x) => Number(x.id)).filter(Boolean);
+      if (invoiceIds.length === 0) {
+        setGigaRows([]);
+        return;
+      }
+
+      // 2) lines (usage only)
+      const { data: lines, error: eLines } = await supabase
+        .from("invoice_line_items")
+        .select("invoice_id,prev_reading_gb,curr_reading_gb,usage_gb,price_per_gb,line_total")
+        .in("invoice_id", invoiceIds);
+
+      if (eLines) throw eLines;
+
+      // 3) customers map
+      const custIds = Array.from(new Set((invs || []).map((x) => Number(x.customer_id)).filter(Boolean)));
+      const { data: custs, error: eCust } = await supabase
+        .from("customers")
+        .select("id,name,type,price_per_gb,last_reading_gb")
+        .in("id", custIds);
+
+      if (eCust) throw eCust;
+
+      const custMap = new Map((custs || []).map((c) => [Number(c.id), c]));
+      const invMap = new Map((invs || []).map((i) => [Number(i.id), i]));
+
+      // flat rows
+      const rows = (lines || [])
+        .filter((l) => l.usage_gb !== null && l.usage_gb !== undefined)
+        .map((l, idx) => {
+          const inv = invMap.get(Number(l.invoice_id)) || {};
+          const cust = custMap.get(Number(inv.customer_id)) || {};
+          const prev = safeNum(l.prev_reading_gb);
+          const curr = safeNum(l.curr_reading_gb);
+          const usage = safeNum(l.usage_gb ?? Math.max(0, curr - prev));
+          const ppg = safeNum(l.price_per_gb ?? cust.price_per_gb ?? 0);
+          const total = safeNum(l.line_total ?? usage * ppg);
+          return {
+            key: `${l.invoice_id}-${idx}`,
+            invoice_id: Number(l.invoice_id),
+            invoice_date: inv.invoice_date || (inv.created_at ? String(inv.created_at).slice(0, 10) : ""),
+            customer_id: Number(inv.customer_id || 0),
+            customer_name: cust.name || "",
+            prev_reading_gb: prev,
+            curr_reading_gb: curr,
+            usage_gb: usage,
+            price_per_gb: ppg,
+            line_total: total,
+          };
+        });
+
+      setGigaRows(rows);
+    } catch (err) {
+      console.error(err);
+      alert(err?.message || "تعذر تحميل تقرير الجيجا");
+    } finally {
+      setGigaLoading(false);
+    }
+  }
+
+  function printGigaReport() {
+    const rows = gigaFilteredRows || [];
+    const title = "تقرير الجيجا";
+    const hdr = `
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
+        <div>
+          <div style="font-weight:800;font-size:18px;margin-bottom:4px;">${title}</div>
+          <div style="color:#666;font-size:12px;">الفترة: ${from} → ${to}</div>
+        </div>
+        <div style="text-align:left;color:#666;font-size:12px;">طباعة: ${new Date().toLocaleString()}</div>
+      </div>
+      <hr style="border:none;border-top:1px solid #ddd;margin:12px 0;" />
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#333;">
+        <div>عدد الفواتير: <b>${gigaSummary.invoices}</b></div>
+        <div>عدد العملاء: <b>${gigaSummary.customers}</b></div>
+        <div>إجمالي الاستهلاك (GB): <b>${money(gigaSummary.usage)}</b></div>
+        <div>إجمالي المبلغ: <b>${money(gigaSummary.amount)}</b></div>
+      </div>
+    `;
+    const table = `
+      <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;">
+        <thead>
+          <tr>
+            <th style="border:1px solid #ddd;padding:6px;">#</th>
+            <th style="border:1px solid #ddd;padding:6px;">التاريخ</th>
+            <th style="border:1px solid #ddd;padding:6px;">العميل</th>
+            <th style="border:1px solid #ddd;padding:6px;">فاتورة</th>
+            <th style="border:1px solid #ddd;padding:6px;">قراءة سابقة</th>
+            <th style="border:1px solid #ddd;padding:6px;">قراءة حالية</th>
+            <th style="border:1px solid #ddd;padding:6px;">استهلاك</th>
+            <th style="border:1px solid #ddd;padding:6px;">سعر الجيجا</th>
+            <th style="border:1px solid #ddd;padding:6px;">الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (r, i) => `
+            <tr>
+              <td style="border:1px solid #ddd;padding:6px;">${i + 1}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.customer_name || ""}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td>
+              <td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td>
+            </tr>
+          `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `;
+
+    const html = `
+      <html lang="ar" dir="rtl">
+        <head>
+          <meta charset="UTF-8" />
+          <title>${title}</title>
+          <style>
+            body{ font-family: Arial, sans-serif; padding:16px; }
+            @media print { .no-print{ display:none !important; } }
+          </style>
+        </head>
+        <body>
+          ${hdr}
+          ${table}
+          <script>window.onload=function(){ window.print(); };</script>
+        </body>
+      </html>
+    `;
+    const w = window.open("", "_blank");
+    if (!w) return alert("المتصفح منع نافذة الطباعة");
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  // auto reload on tab/filters
+  useEffect(() => {
+    if (tab === "giga") loadGigaReport();
+    // eslint-disable-next-line
+  }, [tab, from, to, gigaCustomerId]);
 
   // ===================== Printing =====================
   async function getSettingsHeader() {
@@ -733,7 +731,7 @@ return (moves || []).map((r) => {
 
   async function printCardMoves() {
     const hdr = await getSettingsHeader();
-    const rows = filteredMoves;
+    const rows = filteredMoves || [];
 
     const htmlRows = rows
       .map((r, idx) => {
@@ -769,7 +767,9 @@ return (moves || []).map((r) => {
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — تقرير حركة الكروت</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
+              hdr.name
+            )} — تقرير حركة الكروت</div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
             <div class="sub">${usingView ? "المصدر: View v_card_movements" : "المصدر: Table card_movements"}</div>
           </div>
@@ -784,7 +784,9 @@ return (moves || []).map((r) => {
           <div class="box kpi"><div class="muted">IN</div><div class="v">${money(totalsMoves.inQty)}</div></div>
           <div class="box kpi"><div class="muted">OUT</div><div class="v">${money(totalsMoves.outQty)}</div></div>
           <div class="box kpi"><div class="muted">الصافي</div><div class="v">${money(totalsMoves.net)}</div></div>
-          ${cardTypeId !== "all" ? `<div class="box kpi"><div class="muted">الرصيد الحالي</div><div class="v">${money(selectedBalanceNow)}</div></div>` : ""}
+          ${cardTypeId !== "all" ? `<div class="box kpi"><div class="muted">الرصيد الحالي</div><div class="v">${money(
+            selectedBalanceNow
+          )}</div></div>` : ""}
         </div>
 
         <table>
@@ -817,7 +819,7 @@ return (moves || []).map((r) => {
 
   async function printItemMovesSummary() {
     const hdr = await getSettingsHeader();
-    const rows = itemSummaryRows;
+    const rows = itemSummaryRows || [];
 
     const htmlRows = rows
       .map((r, idx) => {
@@ -849,7 +851,9 @@ return (moves || []).map((r) => {
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — تقرير حركة الأصناف + الرصيد</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
+              hdr.name
+            )} — تقرير حركة الأصناف + الرصيد</div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
             <div class="sub">يعرض: الرصيد الحالي + إجمالي IN/OUT خلال الفترة</div>
           </div>
@@ -890,7 +894,7 @@ return (moves || []).map((r) => {
     const cust = selectedCustomer;
     if (!cust) return alert("اختر عميل");
 
-    const rows = ledgerFiltered;
+    const rows = ledgerFiltered || [];
 
     const htmlRows = rows
       .map((r, idx) => {
@@ -923,7 +927,9 @@ return (moves || []).map((r) => {
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — كشف حساب عميل</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
+              hdr.name
+            )} — كشف حساب عميل</div>
             <div class="sub">العميل: <b>${escapeHtml(cust.name || "-")}</b></div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
             <div class="sub">${ledgerUsingView ? "المصدر: View v_customer_ledger" : "المصدر: invoices + payments"}</div>
@@ -1010,12 +1016,11 @@ return (moves || []).map((r) => {
           <button className={"btn " + (tab === "customerLedger" ? "" : "btn-outline")} onClick={() => setTab("customerLedger")}>
             كشف حساب عميل
           </button>
-
-          
           <button className={"btn " + (tab === "giga" ? "" : "btn-outline")} onClick={() => setTab("giga")}>
             تقرير الجيجا
           </button>
-{tab === "cardMoves" && (
+
+          {tab === "cardMoves" && (
             <>
               <button className="btn btn-outline" onClick={loadMovements} disabled={loading}>
                 تحديث
@@ -1052,27 +1057,24 @@ return (moves || []).map((r) => {
               </button>
             </>
           )}
+
           {tab === "giga" && (
             <>
-              <select className="input" style={{ minWidth: 220 }} value={gigaCustomerId} onChange={(e)=>setGigaCustomerId(e.target.value)}>
+              <select className="input" style={{ minWidth: 220 }} value={gigaCustomerId} onChange={(e) => setGigaCustomerId(e.target.value)}>
                 <option value="all">كل عملاء الجيجا</option>
-                {(customers||[]).filter(c=>String(c.type||"")==="giga").map(c=>(
-                  <option key={c.id} value={String(c.id)}>{c.name}</option>
+                {(customers || []).filter((c) => String(c.type || "") === "giga").map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </option>
                 ))}
               </select>
 
-              <input
-                className="input"
-                style={{ minWidth: 220 }}
-                placeholder="بحث (اسم العميل أو رقم الفاتورة)"
-                value={gigaQ}
-                onChange={(e)=>setGigaQ(e.target.value)}
-              />
+              <input className="input" style={{ minWidth: 220 }} placeholder="بحث (اسم العميل أو رقم الفاتورة)" value={gigaQ} onChange={(e) => setGigaQ(e.target.value)} />
 
               <button className="btn btn-outline" onClick={loadGigaReport} disabled={gigaLoading}>
                 تحديث
               </button>
-              <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaRows||[]).length}>
+              <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaFilteredRows || []).length}>
                 طباعة
               </button>
             </>
@@ -1107,7 +1109,7 @@ return (moves || []).map((r) => {
                 نوع الكرت
                 <select className="input" value={cardTypeId} onChange={(e) => setCardTypeId(e.target.value)}>
                   <option value="all">الكل</option>
-                  {cardTypes.map((ct) => (
+                  {(cardTypes || []).map((ct) => (
                     <option key={ct.id} value={ct.id}>
                       {ct.name}
                     </option>
@@ -1169,14 +1171,14 @@ return (moves || []).map((r) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredMoves.length === 0 ? (
+                  {(filteredMoves || []).length === 0 ? (
                     <tr>
                       <td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>
                         لا توجد حركات
                       </td>
                     </tr>
                   ) : (
-                    filteredMoves.map((r, idx) => {
+                    (filteredMoves || []).map((r, idx) => {
                       const isIn = String(r.movement_type) === "IN";
                       return (
                         <tr key={r.id}>
@@ -1222,11 +1224,11 @@ return (moves || []).map((r) => {
 
               <label>
                 بحث صنف
-                <input className="inp" value={itemSearch} onChange={(e)=>setItemSearch(e.target.value)} placeholder="ابحث بالصنف..." />
+                <input className="input" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="ابحث بالصنف..." />
               </label>
 
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input type="checkbox" checked={itemOnlyWithMoves} onChange={(e)=>setItemOnlyWithMoves(e.target.checked)} />
+                <input type="checkbox" checked={itemOnlyWithMoves} onChange={(e) => setItemOnlyWithMoves(e.target.checked)} />
                 إظهار الأصناف التي لها حركة فقط
               </label>
             </div>
@@ -1252,14 +1254,14 @@ return (moves || []).map((r) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {itemSummaryRows.length === 0 ? (
+                  {(itemSummaryRows || []).length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
                         لا توجد بيانات
                       </td>
                     </tr>
                   ) : (
-                    itemSummaryRows.map((r, idx) => (
+                    (itemSummaryRows || []).map((r, idx) => (
                       <tr key={String(r.card_type_id) + "_" + idx}>
                         <td>{idx + 1}</td>
                         <td>{r.card_name}</td>
@@ -1299,7 +1301,7 @@ return (moves || []).map((r) => {
                 العميل *
                 <select className="input" value={custId} onChange={(e) => setCustId(e.target.value)}>
                   <option value="">اختر عميل...</option>
-                  {customers.map((c) => (
+                  {(customers || []).map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1309,7 +1311,7 @@ return (moves || []).map((r) => {
 
               <label>
                 بحث
-                <input className="input" value={ledgerSearch} onChange={(e)=>setLedgerSearch(e.target.value)} placeholder="نوع/مرجع/ملاحظة..." />
+                <input className="input" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نوع/مرجع/ملاحظة..." />
               </label>
             </div>
 
@@ -1370,14 +1372,14 @@ return (moves || []).map((r) => {
                         اختر عميل ثم اضغط (تحديث)
                       </td>
                     </tr>
-                  ) : ledgerFiltered.length === 0 ? (
+                  ) : (ledgerFiltered || []).length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
                         لا توجد بيانات
                       </td>
                     </tr>
                   ) : (
-                    ledgerFiltered.map((r, idx) => (
+                    (ledgerFiltered || []).map((r, idx) => (
                       <tr key={idx} style={r.is_detail ? { opacity: 0.85 } : undefined}>
                         <td>{idx + 1}</td>
                         <td>{fmtDate(r.created_at)}</td>
@@ -1395,6 +1397,116 @@ return (moves || []).map((r) => {
             </div>
 
             {ledgerLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
+          </div>
+        </>
+      )}
+
+      {/* =============== تقرير الجيجا =============== */}
+      {tab === "giga" && (
+        <>
+          <div className="card no-print" style={{ marginBottom: 12 }}>
+            <div className="grid4">
+              <label>
+                من
+                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              </label>
+              <label>
+                إلى
+                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              </label>
+
+              <label>
+                العميل
+                <select className="input" value={gigaCustomerId} onChange={(e) => setGigaCustomerId(e.target.value)}>
+                  <option value="all">كل عملاء الجيجا</option>
+                  {(customers || []).filter((c) => String(c.type || "") === "giga").map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                بحث
+                <input className="input" value={gigaQ} onChange={(e) => setGigaQ(e.target.value)} placeholder="اسم العميل أو رقم الفاتورة..." />
+              </label>
+            </div>
+
+            <div className="grid2" style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div className="mini-card">
+                  <div className="mini-title">عدد الفواتير</div>
+                  <div className="mini-value">{gigaSummary.invoices}</div>
+                </div>
+                <div className="mini-card">
+                  <div className="mini-title">عدد العملاء</div>
+                  <div className="mini-value">{gigaSummary.customers}</div>
+                </div>
+                <div className="mini-card">
+                  <div className="mini-title">إجمالي GB</div>
+                  <div className="mini-value">{money(gigaSummary.usage)}</div>
+                </div>
+                <div className="mini-card">
+                  <div className="mini-title">إجمالي المبلغ</div>
+                  <div className="mini-value">{money(gigaSummary.amount)}</div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-end", gap: 8 }}>
+                <button className="btn btn-outline" onClick={loadGigaReport} disabled={gigaLoading}>
+                  تحديث
+                </button>
+                <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaFilteredRows || []).length}>
+                  طباعة
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>التاريخ</th>
+                    <th>العميل</th>
+                    <th>فاتورة</th>
+                    <th>قراءة سابقة</th>
+                    <th>قراءة حالية</th>
+                    <th>استهلاك</th>
+                    <th>سعر الجيجا</th>
+                    <th>الإجمالي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(gigaFilteredRows || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: "center", color: "var(--muted)" }}>
+                        لا توجد بيانات
+                      </td>
+                    </tr>
+                  ) : (
+                    gigaFilteredRows.map((r, idx) => (
+                      <tr key={r.key || idx}>
+                        <td>{idx + 1}</td>
+                        <td>{r.invoice_date}</td>
+                        <td>{r.customer_name}</td>
+                        <td>{r.invoice_id}</td>
+                        <td>{r.prev_reading_gb}</td>
+                        <td>{r.curr_reading_gb}</td>
+                        <td style={{ fontWeight: 900 }}>{r.usage_gb}</td>
+                        <td>{money(r.price_per_gb)}</td>
+                        <td style={{ fontWeight: 900 }}>{money(r.line_total)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {gigaLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
           </div>
         </>
       )}
