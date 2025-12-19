@@ -490,3 +490,30 @@ body{ background: var(--bg); color: var(--text); }
   .nav-icon{width:44px !important; height:44px !important; border-radius:16px !important;}
   .nav-version{display:none !important;}
 }
+/* ===== MOBILE ONLY – SAFE ===== */
+body.mobile-ui .sidebar{
+  position: fixed;
+  bottom: 0;
+  top: auto;
+  left: 0;
+  right: 0;
+  height: 74px;
+  border-top: 1px solid var(--border);
+  background: rgba(244,246,251,.92);
+  backdrop-filter: blur(12px);
+  z-index: 9999;
+}
+
+body.mobile-ui .main{
+  padding-bottom: 96px;
+}
+
+body.mobile-ui .brand,
+body.mobile-ui .nav-text,
+body.mobile-ui .nav-version{
+  display: none;
+}
+
+body.mobile-ui .nav-list{
+  flex-direction: row;
+}

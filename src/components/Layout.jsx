@@ -189,6 +189,19 @@ export default function Layout({ children }) {
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [loginErr, setLoginErr] = useState("");
 
+  // ===== Mobile UI toggle (SAFE – لا يؤثر على الكمبيوتر) =====
+useEffect(() => {
+  const applyMobileUI = () => {
+    const isMobile = window.innerWidth <= 680;
+    document.body.classList.toggle("mobile-ui", isMobile);
+  };
+
+  applyMobileUI(); // أول تحميل
+  window.addEventListener("resize", applyMobileUI);
+
+  return () => window.removeEventListener("resize", applyMobileUI);
+}, []);
+
   useEffect(() => {
     setSessUser(currentUser());
   }, [location.pathname]);
