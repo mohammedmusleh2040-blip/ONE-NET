@@ -1,86 +1,167 @@
-// Simple local auth (for internal/local use)
+// src/lib/auth.js
+import { supabase } from "./supabaseClient";
+
+// ====== Local fallback (لو Supabase غير جاهز) ======
 const LS_USERS = "onenet_users_v1";
 const LS_SESSION = "onenet_session_v1";
 
-const defaultUsers = [
-  {
-    id: "admin",
-    username: "admin",
-    password: "admin123",
-    role: "Admin",
-    perms: {
-      view_stock: true,
-      create_invoices: true,
-      edit_delete: true,
-      view_reports: true,
-      view_settings: true,
-    },
-  },
-];
-
-export function getUsers(){
-  try{
-    const raw = localStorage.getItem(LS_USERS);
-    const arr = raw ? JSON.parse(raw) : null;
-    if(Array.isArray(arr) && arr.length) return arr;
-  }catch(e){}
-  localStorage.setItem(LS_USERS, JSON.stringify(defaultUsers));
-  return defaultUsers;
+function safeParse(json, fallback) {
+  try { return JSON.parse(json); } catch { return fallback; }
 }
 
-export function saveUsers(users){
-  localStorage.setItem(LS_USERS, JSON.stringify(users||[]));
+function normalizeUser(u) {
+  return {
+    id: u?.id ?? null,
+    username: String(u?.username || "").trim(),
+    password: String(u?.password || ""), // (حالياً plaintext مثل نظامك)
+    role: u?.role || "Seller",
+    perms: u?.perms && typeof u.perms === "object" ? u.perms : {},
+  };
 }
 
-export function getSession(){
-  try{
-    const raw = localStorage.getItem(LS_SESSION);
-    return raw ? JSON.parse(raw) : null;
-  }catch(e){ return null; }
+// ====== Users (Supabase first) ======
+export async function getUsersAsync() {
+  // try supabase
+  try {
+    const { data, error } = await supabase.from("app_users").select("*").order("username");
+    if (!error && Array.isArray(data)) return data.map(normalizeUser);
+  } catch {}
+  // fallback local
+  const local = safeParse(localStorage.getItem(LS_USERS) || "[]", []);
+  return Array.isArray(local) ? local.map(normalizeUser) : [];
 }
 
-export function setSession(sess){
-  localStorage.setItem(LS_SESSION, JSON.stringify(sess||null));
+// sync version (for existing code)
+export function getUsers() {
+  const local = safeParse(localStorage.getItem(LS_USERS) || "[]", []);
+  return Array.isArray(local) ? local.map(normalizeUser) : [];
 }
 
-export function logout(){
+// save local + best-effort supabase upsert
+export function saveUsers(users) {
+  const arr = Array.isArray(users) ? users.map(normalizeUser) : [];
+  localStorage.setItem(LS_USERS, JSON.stringify(arr));
+
+  // best-effort: upsert to supabase (لا نكسر UI لو فشل)
+  (async () => {
+    try {
+      // upsert by username (لازم تعمل unique على username في الجدول)
+      const payload = arr.map((u) => ({
+        username: u.username,
+        password: u.password,
+        role: u.role,
+        perms: u.perms || {},
+      }));
+      await supabase.from("app_users").upsert(payload, { onConflict: "username" });
+    } catch {}
+  })();
+}
+
+// ====== Session ======
+export function currentUser() {
+  const raw = localStorage.getItem(LS_SESSION);
+  const u = raw ? safeParse(raw, null) : null;
+  return u ? normalizeUser(u) : null;
+}
+
+export function logout() {
   localStorage.removeItem(LS_SESSION);
 }
 
-export function currentUser(){
-  const sess = getSession();
-  if(!sess?.username) return null;
-  const u = getUsers().find(x=>x.username===sess.username);
-  return u || null;
+// ====== Login (Supabase first) ======
+export async function loginAsync(username, password) {
+  const uName = String(username || "").trim();
+  const pass = String(password || "");
+
+  if (!uName || !pass) return { ok: false, error: "أدخل اسم المستخدم وكلمة المرور" };
+
+  // 1) Supabase users
+  try {
+    const { data, error } = await supabase
+      .from("app_users")
+      .select("*")
+      .eq("username", uName)
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      if (String(data.password || "") !== pass) {
+        await logAuthEvent(uName, "login_failed");
+        return { ok: false, error: "بيانات الدخول غير صحيحة" };
+      }
+      const user = normalizeUser(data);
+      localStorage.setItem(LS_SESSION, JSON.stringify(user));
+      await logAuthEvent(uName, "login_success");
+      return { ok: true, user };
+    }
+  } catch {}
+
+  // 2) Fallback local users
+  const localUsers = getUsers();
+  const found = localUsers.find((x) => x.username === uName);
+  if (!found) {
+    await logAuthEvent(uName, "login_failed");
+    return { ok: false, error: "المستخدم غير موجود" };
+  }
+  if (String(found.password || "") !== pass) {
+    await logAuthEvent(uName, "login_failed");
+    return { ok: false, error: "بيانات الدخول غير صحيحة" };
+  }
+  localStorage.setItem(LS_SESSION, JSON.stringify(found));
+  await logAuthEvent(uName, "login_success");
+  return { ok: true, user: found };
 }
 
-export function login(username, password){
-  const u = getUsers().find(x=>x.username===String(username||"").trim());
-  if(!u) return { ok:false, error:"المستخدم غير موجود" };
-  if(String(u.password) !== String(password||"")) return { ok:false, error:"كلمة المرور غير صحيحة" };
-  setSession({ username: u.username, role: u.role, ts: Date.now() });
-  return { ok:true, user:u };
+// Sync wrapper (لو في مكان قديم يستخدم login())
+export function login(username, password) {
+  // هذا فقط للرجوع للخلف (لا يعتمد عليه للجوال)
+  const users = getUsers();
+  const uName = String(username || "").trim();
+  const pass = String(password || "");
+  const found = users.find((x) => x.username === uName);
+  if (!found) return { ok: false, error: "المستخدم غير موجود" };
+  if (String(found.password || "") !== pass) return { ok: false, error: "بيانات الدخول غير صحيحة" };
+  localStorage.setItem(LS_SESSION, JSON.stringify(found));
+  return { ok: true, user: found };
 }
 
-const roleDefaults = {
-  Admin: { view_stock:true, create_invoices:true, edit_delete:true, view_reports:true, view_settings:true },
-  Seller:{ view_stock:true, create_invoices:true, edit_delete:false, view_reports:false, view_settings:false },
-  Viewer:{ view_stock:true, create_invoices:false, edit_delete:false, view_reports:true, view_settings:false },
-};
-
-export function effectivePerms(user){
-  if(!user) return {};
-  const base = roleDefaults[user.role] || {};
-  const p = user.perms || {};
-  return { ...base, ...p };
+// ====== Permissions ======
+export function effectivePerms(user) {
+  const role = user?.role || "Seller";
+  const p = user?.perms || {};
+  if (role === "Admin") {
+    return {
+      view_stock: true,
+      view_reports: true,
+      view_settings: true,
+      create_invoice: true,
+      edit_delete: true,
+      ...p,
+    };
+  }
+  return {
+    view_stock: !!p.view_stock,
+    view_reports: !!p.view_reports,
+    view_settings: !!p.view_settings,
+    create_invoice: !!p.create_invoice,
+    edit_delete: !!p.edit_delete,
+  };
 }
 
-export function canAccessPath(user, path){
+export function canAccessPath(user, path) {
   const perms = effectivePerms(user);
-  if(path.startsWith("/settings")) return !!perms.view_settings;
-  if(path.startsWith("/ledger")) return !!perms.view_reports;
-  if(path.startsWith("/invoices") || path.startsWith("/payments") || path.startsWith("/customers") || path.startsWith("/expenses"))
-    return !!perms.create_invoices || !!perms.view_reports || user?.role==="Admin"; // allow basic access
-  if(path.startsWith("/stock")) return !!perms.view_stock;
-  return true; // dashboard
+  const p = String(path || "");
+  if (p.startsWith("/settings")) return !!perms.view_settings || user?.role === "Admin";
+  if (p.startsWith("/ledger")) return !!perms.view_reports || user?.role === "Admin";
+  if (p.startsWith("/stock")) return !!perms.view_stock || user?.role === "Admin";
+  return true;
+}
+
+// ====== Audit / Tracking ======
+export async function logAuthEvent(username, action) {
+  try {
+    await supabase.from("user_audit").insert([
+      { username: String(username || ""), action: String(action || ""), at: new Date().toISOString() },
+    ]);
+  } catch {}
 }

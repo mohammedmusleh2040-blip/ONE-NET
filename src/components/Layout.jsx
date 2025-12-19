@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { canAccessPath, currentUser, login, logout, effectivePerms } from "../lib/auth.js";
+import { canAccessPath, currentUser, loginAsync, logout, effectivePerms } from "../lib/auth.js";
 import { supabase } from "../lib/supabaseClient.js";
 
 /** Minimal inline SVG icons (no extra deps) */
@@ -264,17 +264,18 @@ useEffect(() => {
 
   const allowed = sessUser ? canAccessPath(sessUser, location.pathname) : false;
 
-  function doLogin(e){
-    e.preventDefault();
-    const res = login(loginForm.username, loginForm.password);
-    if(!res.ok){
-      setLoginErr(res.error || "خطأ في تسجيل الدخول");
-      return;
-    }
-    setLoginErr("");
-    setSessUser(res.user);
-    navigate("/dashboard");
+  async function doLogin(e){
+  e.preventDefault();
+  const res = await loginAsync(loginForm.username, loginForm.password);
+  if(!res.ok){
+    setLoginErr(res.error || "خطأ في تسجيل الدخول");
+    return;
   }
+  setLoginErr("");
+  setSessUser(res.user);
+  navigate("/dashboard");
+}
+
 
   function doLogout(){
     logout();
