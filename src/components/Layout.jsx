@@ -266,12 +266,15 @@ useEffect(() => {
 
   async function doLogin(e){
   e.preventDefault();
-  const res = await loginAsync(loginForm.username, loginForm.password);
+  setLoginErr("");
+
+  const res = await login(loginForm.username, loginForm.password);
+
   if(!res.ok){
     setLoginErr(res.error || "خطأ في تسجيل الدخول");
     return;
   }
-  setLoginErr("");
+
   setSessUser(res.user);
   navigate("/dashboard");
 }
