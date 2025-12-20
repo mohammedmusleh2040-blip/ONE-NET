@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { canAccessPath, currentUser, loginAsync, logout, effectivePerms } from "../lib/auth.js";
+import { canAccessPath, currentUser, login, logout, effectivePerms } from "../lib/auth.js";
 import { supabase } from "../lib/supabaseClient.js";
 
 /** Minimal inline SVG icons (no extra deps) */
@@ -263,22 +263,32 @@ useEffect(() => {
   const current = (navItemsFiltered.find((x) => location.pathname.startsWith(x.to)) || navItemsFiltered[0] || navItems[0]);
 
   const allowed = sessUser ? canAccessPath(sessUser, location.pathname) : false;
-
-  async function doLogin(e){
+async function doLogin(e) {
   e.preventDefault();
   setLoginErr("");
 
-  const res = await login(loginForm.username, loginForm.password);
+  try {
+    setLoggingIn(true);
 
-  if(!res.ok){
-    setLoginErr(res.error || "خطأ في تسجيل الدخول");
-    return;
+    const res = await login(loginForm.username, loginForm.password);
+
+    if (!res?.ok) {
+      // رسائل واضحة
+      setLoginErr(res?.error || "بيانات الدخول غير صحيحة");
+      setLoggingIn(false);
+      return;
+    }
+
+    // نجاح
+    setSessUser(res.user);
+    setLoginForm((p) => ({ ...p, password: "" }));
+    setLoggingIn(false);
+  } catch (err) {
+    console.error(err);
+    setLoginErr("تعذر تسجيل الدخول (خطأ اتصال)");
+    setLoggingIn(false);
   }
-
-  setSessUser(res.user);
-  navigate("/dashboard");
 }
-
 
   function doLogout(){
     logout();
