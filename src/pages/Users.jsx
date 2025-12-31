@@ -257,15 +257,19 @@ export default function Users() {
     if (!u?.id) return;
     setLoading(true);
     try {
-      const r = await supabase.rpc("app_users_update", {
-        p_actor_id: actor,
-        p_user_id: u.id,
-        p_username: u.username,
-        p_email: u.email || null,
-        p_role: u.role || "viewer",
-        p_is_active: false,
-        p_perms: safeJson(u.perms, {}),
-      });
+      const actorId = currentUser()?.id || null; // حسب نظامك
+
+const { data, error } = await supabase.rpc("app_users_update", {
+  p_actor_id: actorId,
+  p_user_id: editId,
+  p_username: username,
+  p_role: role,
+  p_is_active: isActive,
+  p_perms: perms, // jsonb
+});
+
+if (error) throw error;
+
       if (r?.error) throw r.error;
       toastText(setMsg, "تم إيقاف المستخدم ✅", "ok");
       await loadUsers();
