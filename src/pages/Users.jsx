@@ -4,17 +4,9 @@ import { currentUser } from "../lib/auth";
 
 /**
  * Users.jsx (fixed)
- * - Keeps the same general layout (form on top, list below)
- * - واضح تحديد الصلاحيات (Toggle + تلوين + ✓)
- * - يعرض آخر دخول لكل مستخدم (login_logs)
- * - رسائل نجاح/خطأ عند إنشاء/تعديل/تغيير كلمة المرور
- *
- * ملاحظة مهمة:
- * إذا عندك Functions متكررة بنفس الاسم (Overload) مثل app_users_update / app_users_set_password
- * PostgREST قد يعطي 404. الحل: خلي لكل Function اسم واحد فقط بدون تكرار.
+ * - RPC payloads match DB function signatures exactly (no extra keys)
+ * - Fix deactivateUser (no editId undefined, no app_users_update_v2)
  */
-
-const money = (v) => (Number(v || 0) || 0).toFixed(2);
 
 const PERM_DEFS = [
   { key: "dashboard", label: "الرئيسية" },
@@ -64,12 +56,12 @@ export default function Users() {
   // form state
   const [editingId, setEditingId] = useState(null);
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(""); // UI فقط (لن نرسلها للـ RPC لأن الدوال عندك ما تدعم email)
   const [role, setRole] = useState("viewer");
   const [isActive, setIsActive] = useState(true);
   const [password, setPassword] = useState("");
+
   const [perms, setPerms] = useState(() => {
-    // default viewer perms
     const obj = {};
     PERM_DEFS.forEach((p) => (obj[p.key] = false));
     obj.dashboard = true;
@@ -99,27 +91,23 @@ export default function Users() {
     setPerms(obj);
   };
 
-  const togglePerm = (k) => {
-    setPerms((p) => ({ ...p, [k]: !p?.[k] }));
-  };
+  const togglePerm = (k) => setPerms((p) => ({ ...p, [k]: !p?.[k] }));
 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      // الأفضل: RPC list
       let res = await supabase.rpc("app_users_list");
       if (res?.error) {
-        // fallback direct select (إذا ما عندك RPC)
         res = await supabase
           .from("app_users")
           .select("id, username, role, is_active, perms, email")
           .order("username", { ascending: true });
       }
       if (res?.error) throw res.error;
+
       const rows = res?.data || [];
       setUsers(rows);
 
-      // load last login info (optional)
       await loadLoginInfo(rows.map((r) => r.id).filter(Boolean));
     } catch (e) {
       console.error(e);
@@ -133,20 +121,17 @@ export default function Users() {
     if (!showLogs) return;
     if (!userIds?.length) return setLoginInfo({});
 
-    // try logged_in_at then fallback logged_at
     const tryCols = ["logged_at", "logged_in_at", "logged_at_ts"];
     for (const col of tryCols) {
-      const q = supabase
+      const { data, error } = await supabase
         .from("login_logs")
         .select(`user_id, ${col}, user_agent`)
         .in("user_id", userIds)
         .order(col, { ascending: false })
         .limit(5000);
 
-      const { data, error } = await q;
       if (error) {
-        // إذا العمود غير موجود جرّب الثاني
-        if (String(error?.code) === "42703") continue;
+        if (String(error?.code) === "42703") continue; // column not found
         console.warn("login_logs load error:", error);
         return;
       }
@@ -154,9 +139,7 @@ export default function Users() {
       const m = {};
       for (const row of data || []) {
         const uid = row.user_id;
-        if (!m[uid]) {
-          m[uid] = { at: row[col], ua: row.user_agent || "" };
-        }
+        if (!m[uid]) m[uid] = { at: row[col], ua: row.user_agent || "" };
       }
       setLoginInfo(m);
       return;
@@ -184,70 +167,64 @@ export default function Users() {
 
   const saveUser = async () => {
     if (!username.trim()) return toastText(setMsg, "اكتب اسم المستخدم", "err");
-    if (!editingId && password.trim().length < 4) return toastText(setMsg, "اكتب كلمة مرور (4 أحرف أو أكثر)", "err");
+
+    // create يحتاج كلمة مرور
+    if (!editingId && password.trim().length < 4) {
+      return toastText(setMsg, "اكتب كلمة مرور (4 أحرف أو أكثر)", "err");
+    }
 
     setLoading(true);
     try {
-      const payload = {
-        p_actor_id: actor,
-        p_user_id: editingId,
-        p_username: username.trim(),
-        p_email: email.trim() || null,
-        p_role: role,
-        p_is_active: !!isActive,
-        p_perms: perms || {},
-        p_password: password || null, // only for create (if function ignores on update)
-        p_new_password: password || null, // some variants use this
-      };
-
       if (!editingId) {
-        // Create
-        let r = await supabase.rpc("app_users_create", payload);
-        if (r?.error) {
-          // handle already exists
-          if (String(r.error?.code) === "23505") {
-            toastText(setMsg, "المستخدم موجود من قبل", "err");
-            return;
-          }
-          throw r.error;
-        }
+        // ✅ CREATE: مطابق للتوقيع
+        const payloadCreate = {
+          p_actor_id: actor,
+          p_username: username.trim(),
+          p_password: password.trim(),
+          p_role: role,
+          p_is_active: !!isActive,
+          p_perms: perms || {},
+        };
+
+        const r = await supabase.rpc("app_users_create", payloadCreate);
+        if (r?.error) throw r.error;
+
         toastText(setMsg, "تم إضافة المستخدم بنجاح ✅", "ok");
         resetForm();
       } else {
-        // Update user core fields (no password)
-        let r = await supabase.rpc("app_users_update", payload);
+        // ✅ UPDATE: مطابق للتوقيع
+        const payloadUpdate = {
+          p_actor_id: actor,
+          p_user_id: editingId,
+          p_username: username.trim(),
+          p_role: role,
+          p_is_active: !!isActive,
+          p_perms: perms || {},
+        };
+
+        const r = await supabase.rpc("app_users_update", payloadUpdate);
         if (r?.error) throw r.error;
 
-        // If password entered: change password via rpc
+        // ✅ change password (اختياري)
         if (password && password.trim().length >= 4) {
           const r2 = await supabase.rpc("app_users_set_password", {
             p_actor_id: actor,
             p_user_id: editingId,
             p_new_password: password.trim(),
-            user_id: editingId, // fallback names
-            new_password: password.trim(),
           });
           if (r2?.error) throw r2.error;
-          toastText(setMsg, "تم تغيير كلمة المرور ✅", "ok");
+          toastText(setMsg, "تم حفظ التعديلات + تغيير كلمة المرور ✅", "ok");
         } else {
           toastText(setMsg, "تم حفظ التعديلات ✅", "ok");
         }
+
         resetForm();
       }
 
       await loadUsers();
     } catch (e) {
       console.error(e);
-      // if function not found because of overload, show clear message
-      if (String(e?.code) === "404" || /Not Found/i.test(String(e?.message || ""))) {
-        toastText(
-          setMsg,
-          "الدوال (RPC) غير متاحة بسبب تكرار اسم الدالة في Supabase (Overload). احذف التكرار أو غيّر اسم واحدة.",
-          "err"
-        );
-      } else {
-        toastText(setMsg, `خطأ حفظ المستخدم: ${e?.message || e}`, "err");
-      }
+      toastText(setMsg, `خطأ حفظ المستخدم: ${e?.message || e}`, "err");
     } finally {
       setLoading(false);
     }
@@ -257,20 +234,18 @@ export default function Users() {
     if (!u?.id) return;
     setLoading(true);
     try {
-      const actorId = currentUser()?.id || null; // حسب نظامك
+      const payload = {
+        p_actor_id: actor,
+        p_user_id: u.id,
+        p_username: u.username,
+        p_role: u.role || "viewer",
+        p_is_active: false,
+        p_perms: safeJson(u.perms, {}) || {},
+      };
 
-const { data, error } = await supabase.rpc("app_users_update", {
-  p_actor_id: actorId,
-  p_user_id: editId,
-  p_username: username,
-  p_role: role,
-  p_is_active: isActive,
-  p_perms: perms, // jsonb
-});
-
-if (error) throw error;
-
+      const r = await supabase.rpc("app_users_update", payload);
       if (r?.error) throw r.error;
+
       toastText(setMsg, "تم إيقاف المستخدم ✅", "ok");
       await loadUsers();
     } catch (e) {
@@ -281,7 +256,7 @@ if (error) throw error;
     }
   };
 
-  // ===== Styles (keep soft UI look) =====
+  // ===== Styles =====
   const cardStyle = {
     background: "#f3f4f6",
     borderRadius: 18,
