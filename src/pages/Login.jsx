@@ -25,10 +25,11 @@ export default function Login() {
     setMsg("");
     setLoading(true);
 
-    const { data, error } = await supabase.rpc("app_login2", {
-      p_username: username.trim(),
-      p_password: password,
-    });
+    const { data, error } = await supabase.rpc("app_login", {
+  p_username: username,
+  p_password: password,
+});
+
 
     setLoading(false);
 

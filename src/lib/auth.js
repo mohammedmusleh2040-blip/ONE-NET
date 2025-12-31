@@ -182,9 +182,9 @@ export async function loginWithEmail(email, password, remember = true) {
 export async function loginWithUsername(username, password, remember = true) {
   try {
     const { data, error } = await supabase.rpc("app_login2", {
-      p_username: username,
-      p_password: password,
-    });
+  p_username: username,
+  p_password: password,
+});
 
     if (error) return { ok: false, error: error.message || "فشل تسجيل الدخول" };
 
