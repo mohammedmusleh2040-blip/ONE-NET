@@ -1,7 +1,7 @@
 // src/components/Layout.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { canAccessPath, currentUser, logout, effectivePerms } from "../lib/auth";
+import {canAccessPath, currentUser, logout, effectivePerms, setSessionUser } from "../lib/auth";
 import { supabase } from "../lib/supabaseClient";
 
 function Icon({ name }) {
@@ -33,6 +33,44 @@ export default function Layout() {
   useEffect(() => {
     setSessUser(currentUser());
   }, [location.pathname]);
+  // ✅ Refresh sidebar permissions immediately when user perms change (same tab / other tabs)
+  useEffect(() => {
+    const onChanged = () => setSessUser(currentUser());
+    window.addEventListener("session_user_changed", onChanged);
+    window.addEventListener("storage", (e) => {
+      if (e.key === "onenet_session_user_v1") onChanged();
+    });
+    return () => {
+      window.removeEventListener("session_user_changed", onChanged);
+    };
+  }, []);
+
+  // ✅ Optional: live permissions updates from DB (requires Realtime enabled on public.app_users)
+  useEffect(() => {
+    if (!sessUser?.id) return;
+    let channel;
+    try {
+      channel = supabase
+        .channel("app_users_perm_watch_" + sessUser.id)
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: "app_users", filter: `id=eq.${sessUser.id}` },
+          (payload) => {
+            const nu = payload?.new || {};
+            const merged = { ...currentUser(), ...nu };
+            setSessionUser(merged);
+            setSessUser(merged);
+          }
+        )
+        .subscribe();
+    } catch {}
+    return () => {
+      try {
+        if (channel) supabase.removeChannel(channel);
+      } catch {}
+    };
+  }, [sessUser?.id]);
+
   useEffect(() => {
     let alive = true;
     (async () => {

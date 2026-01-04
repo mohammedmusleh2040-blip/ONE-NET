@@ -202,7 +202,7 @@ export default function Invoices() {
   async function loadCustomers() {
     const { data, error } = await supabase
       .from("customers")
-      .select("id,name,type,phone,address,notes,opening_balance,price_per_gb,last_reading_gb,created_at")
+      .select("id,name,type,phone,address,notes,opening_balance,price_per_gb,last_reading_gb,discount_percent,created_at")
       .order("id", { ascending: true });
     if (error) throw error;
     setCustomers(data || []);
@@ -1575,6 +1575,8 @@ try {
   onClick={() => {
     setCustomerId(String(c.id));
     setCustomerQuery(c.name || "");
+    // ✅ طبق خصم العميل الافتراضي (يمكن تعديله في الفاتورة)
+    setDiscountPercent(Number(c.discount_percent || 0));
     setShowCustomerList(false);
   }}
   style={{
@@ -1586,10 +1588,17 @@ try {
   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
 >
 
-                        <div style={{ fontWeight: 600 }}>{c.name}</div>
-                        <div style={{ fontSize: 11, opacity: 0.65 }}>
-                          النوع: {c.type} {c.phone ? `— ${c.phone}` : ""}
-                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+  <div style={{ fontWeight: 700 }}>{c.name}</div>
+  {Number(c.discount_percent || 0) > 0 && (
+    <div style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, border: "1px solid #d0d7de", background: "#f6f8fa" }}>
+      خصم افتراضي: {Number(c.discount_percent || 0).toFixed(2)}%
+    </div>
+  )}
+</div>
+<div style={{ fontSize: 11, opacity: 0.72, marginTop: 2 }}>
+  النوع: {c.type} {c.phone ? `— ${c.phone}` : ""}
+</div>
                       </div>
                     ))}
 

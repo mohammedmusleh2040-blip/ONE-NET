@@ -11,6 +11,7 @@ const empty = {
   opening_balance: 0,
   price_per_gb: 0,
   last_reading_gb: 0,
+  discount_percent: 0,
 };
 
 async function payOpeningBalance(c){
@@ -106,6 +107,7 @@ export default function Customers() {
       opening_balance: Number(r.opening_balance || 0),
       price_per_gb: Number(r.price_per_gb || 0),
       last_reading_gb: Number(r.last_reading_gb || 0),
+      discount_percent: Number(r.discount_percent || 0),
     });
     setShowForm(true);
   };
@@ -128,6 +130,7 @@ export default function Customers() {
         price_per_gb: form.type === "giga" ? Number(form.price_per_gb || 0) : 0,
         last_reading_gb:
           form.type === "giga" ? Number(form.last_reading_gb || 0) : 0,
+        discount_percent: Number(form.discount_percent || 0),
       };
 
       if (form.id) {
@@ -250,6 +253,20 @@ export default function Customers() {
               />
             </div>
           </div>
+
+            <div className="col" style={{ flex: "0 0 220px" }}>
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                نسبة خصم افتراضية (%)
+              </label>
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                name="discount_percent"
+                value={form.discount_percent}
+                onChange={onChange}
+              />
+            </div>
 
           <div className="row">
             <div className="col">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { currentUser } from "../lib/auth";
+import { currentUser, setSessionUser } from "../lib/auth";
 
 /**
  * Users.jsx (fixed)
@@ -17,10 +17,39 @@ const PERM_DEFS = [
   { key: "payments", label: "السندات" },
   { key: "expenses", label: "المصروفات" },
   { key: "reports", label: "التقارير" },
+  { key: "ledger", label: "التسوية (Ledger)" },
   { key: "stock", label: "المخزون" },
   { key: "users", label: "المستخدمين" },
   { key: "settings", label: "الإعدادات" },
 ];
+
+const ALL_PERM_KEYS = Array.from(new Set(PERM_DEFS.map((p) => p.key)));
+
+/** Ensure we always send full perms object (including false keys) */
+function normalizePerms(input) {
+  const out = {};
+  ALL_PERM_KEYS.forEach((k) => (out[k] = !!input?.[k]));
+  return out;
+}
+
+function updateSessionPermsIfSelf({ actorId, editedUserId, username, role, email, perms }) {
+  try {
+    if (!actorId || !editedUserId) return;
+    if (String(actorId) !== String(editedUserId)) return;
+
+    const cur = currentUser?.() || {};
+    const next = {
+      ...cur,
+      id: cur.id || editedUserId,
+      username: username ?? cur.username,
+      role: role ?? cur.role,
+      email: email ?? cur.email,
+      perms: perms ?? cur.perms,
+    };
+    setSessionUser(next);
+    window.dispatchEvent(new Event("onenet_session_user_changed"));
+  } catch {}
+}
 
 function safeJson(v, fallback) {
   try {
@@ -182,7 +211,7 @@ export default function Users() {
   p_password: password.trim(),
   p_role: role,
   p_is_active: !!isActive,       // ✅ لا تعكسها
-  p_perms: perms || {},
+  p_perms: normalizePerms(perms),
   p_email: (email || "").trim() || null,
 };
 
@@ -201,7 +230,7 @@ if (error) throw error;
   p_username: username.trim(),
   p_password: password.trim(),
   p_role: role,
-  p_perms: perms || {},
+  p_perms: normalizePerms(perms),
   p_email: email?.trim() || null,
   p_is_active: !!isActive,
 };
@@ -212,7 +241,7 @@ if (error) throw error;
       p_user_id: editingId,
       p_username: username.trim(),
       p_role: role,
-      p_perms: perms || {},
+      p_perms: normalizePerms(perms),
       p_is_active: !!isActive,
       p_email: email?.trim() || null,
     })
@@ -232,6 +261,16 @@ if (error) throw error;
         } else {
           toastText(setMsg, "تم حفظ التعديلات ✅", "ok");
         }
+
+        // إذا عدلت صلاحيات نفسك، حدّثها فوراً بدون تسجيل خروج
+        updateSessionPermsIfSelf({
+          actorId: actor,
+          editedUserId: editingId,
+          username: username.trim(),
+          role,
+          email: email?.trim() || null,
+          perms: normalizePerms(perms),
+        });
 
         resetForm();
       }
@@ -255,7 +294,7 @@ if (error) throw error;
         p_username: u.username,
         p_role: u.role || "viewer",
         p_is_active: false,
-        p_perms: safeJson(u.perms, {}) || {},
+        p_perms: normalizePerms(safeJson(u.perms, {})),
       };
 
       const r = await supabase.rpc("app_users_update", payload);

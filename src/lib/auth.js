@@ -10,11 +10,18 @@ const LS_REMEMBER = "onenet_login_remember_v1";
 const LS_USERS = "onenet_app_users_v1"; // optional local cache for Settings users page
 
 export function setSessionUser(user) {
-  if (!user) {
-    localStorage.removeItem(LS_USER);
-    return;
+  try {
+    if (!user) {
+      localStorage.removeItem(LS_USER);
+    } else {
+      localStorage.setItem(LS_USER, JSON.stringify(user));
+    }
+  } finally {
+    // ✅ notify UI to refresh permissions immediately (same tab)
+    try {
+      window.dispatchEvent(new Event("session_user_changed"));
+    } catch {}
   }
-  localStorage.setItem(LS_USER, JSON.stringify(user));
 }
 
 export const setCurrentUser = setSessionUser; // backward-compatible alias
@@ -82,13 +89,8 @@ export function effectivePerms(user) {
     return all;
   }
 
-  // Role defaults
-  if (role === "seller") {
-  ["dashboard", "customers", "invoices", "payments", "reports", "ledger"].forEach(
-    (k) => (base[k] = true)
-  );
-}
-
+  // ---- Read perms from DB/session ----
+  let rawPerms = null;
 
   // perms as ARRAY: supports ["*"] or explicit keys
   if (Array.isArray(u.perms)) {
@@ -98,19 +100,39 @@ export function effectivePerms(user) {
       ALL_KEYS.forEach((k) => (all[k] = true));
       return all;
     }
-    const map = { ...base };
+    rawPerms = {};
     arr.forEach((k) => {
-      if (ALL_KEYS.includes(k)) map[k] = true;
+      if (ALL_KEYS.includes(k)) rawPerms[k] = true;
+      // alias support
+      if (k === "report" || k === "reports") rawPerms.reports = true;
     });
-    return map;
   }
 
   // perms as OBJECT: {dashboard:true, ...}
-  if (u.perms && typeof u.perms === "object") {
-    return { ...base, ...u.perms };
+  if (!rawPerms && u.perms && typeof u.perms === "object") {
+    rawPerms = u.perms;
   }
 
-  return base;
+  // If no perms provided => keep base (all false)
+  if (!rawPerms) return base;
+
+  // Normalize: only known keys, coerce to boolean
+  const norm = { ...base };
+  ALL_KEYS.forEach((k) => {
+    if (Object.prototype.hasOwnProperty.call(rawPerms, k)) {
+      norm[k] = !!rawPerms[k];
+    }
+  });
+
+  // ✅ Alias: some UIs store "reports" while the app route/menu uses "ledger"
+  if (!!rawPerms.reports && !Object.prototype.hasOwnProperty.call(rawPerms, "ledger")) {
+    norm.ledger = true;
+  }
+  if (!!rawPerms.ledger && !Object.prototype.hasOwnProperty.call(rawPerms, "reports")) {
+    norm.reports = true;
+  }
+
+  return norm;
 }
 
 
