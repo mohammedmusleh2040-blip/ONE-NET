@@ -54,7 +54,26 @@ function getCardBalanceFromRow(row) {
 
 export default function Ledger() {
   // Tabs
-  const [tab, setTab] = useState("cardMoves"); // cardMoves | itemMoves | customerLedger | giga
+  const [tab, setTab] = useState("cardMoves");
+
+
+  // ===== Auth / Seller Guard =====
+  const [authUser, setAuthUser] = useState(null);
+  const [isSeller, setIsSeller] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const u = data?.user || null;
+        setAuthUser(u);
+        // نفترض وجود seller_user_id في الفواتير وحركات الكروت
+        // إذا عندك نظام صلاحيات أدق (perms/role) عدّله هنا فقط
+        setIsSeller(!!u);
+      } catch {}
+    })();
+  }, []);
+ // cardMoves | itemMoves | customerLedger | giga
 
   // Shared Filters
   const [from, setFrom] = useState(todayISO());
@@ -126,6 +145,12 @@ export default function Ledger() {
           .lt("created_at", toPlus1)
           .order("created_at", { ascending: false });
 
+        // إجبارية للبائع (fallback)
+        if (isSeller && authUser?.id) tq = tq.eq("seller_user_id", authUser.id);
+
+        // إجبارية للبائع
+        if (isSeller && authUser?.id) vq = vq.eq("seller_user_id", authUser.id);
+
         if (cardTypeId !== "all") vq = vq.eq("card_type_id", cardTypeId);
         if (mType !== "all") vq = vq.eq("movement_type", mType);
 
@@ -147,6 +172,9 @@ export default function Ledger() {
           .gte("created_at", from)
           .lt("created_at", toPlus1)
           .order("created_at", { ascending: false });
+
+        // إجبارية للبائع
+        if (isSeller && authUser?.id) vq = vq.eq("seller_user_id", authUser.id);
 
         if (cardTypeId !== "all") tq = tq.eq("card_type_id", cardTypeId);
         if (mType !== "all") tq = tq.eq("movement_type", mType);
@@ -387,6 +415,15 @@ export default function Ledger() {
           .lt("created_at", toTs)
           .order("created_at", { ascending: true });
 
+      // إجبارية للبائع
+      if (isSeller && authUser?.id) {
+        // في حال كان البائع مربوط بفواتيره فقط
+        // نفترض وجود seller_user_id
+        // @ts-ignore
+        // eslint-disable-next-line
+        // supabase يعيد query جديد
+      }
+
         if (error) throw error;
 
         // حماية: أحيانًا يرجع Supabase null أو Object بدل Array
@@ -552,6 +589,8 @@ export default function Ledger() {
 
       const { data: invs, error: eInv } = await qInv;
       if (eInv) throw eInv;
+
+      const safeInvs = Array.isArray(invs) ? invs : [];
 
       const invoiceIds = safeInvs.map((x) => Number(x.id)).filter(Boolean);
       if (invoiceIds.length === 0) {

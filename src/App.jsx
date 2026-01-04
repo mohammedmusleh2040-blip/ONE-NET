@@ -12,6 +12,7 @@ import Expenses from "./pages/Expenses";
 import Ledger from "./pages/Ledger";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import Vendors from "./pages/Vendors";
 import Login from "./pages/Login";
 
 export default function App() {
@@ -32,7 +33,9 @@ export default function App() {
         <Route path="expenses" element={<Expenses />} />
         <Route path="ledger" element={<Ledger />} />
         <Route path="users" element={<Users />} />
+        <Route path="/vendors" element={<Vendors />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="vendors" element={<Vendors />} />
 
         {/* fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -84,10 +84,11 @@ export function effectivePerms(user) {
 
   // Role defaults
   if (role === "seller") {
-    ["dashboard", "customers", "invoices", "payments", "reports"].forEach((k) => (base[k] = true));
-  } else {
-    ["dashboard"].forEach((k) => (base[k] = true));
-  }
+  ["dashboard", "customers", "invoices", "payments", "reports", "ledger"].forEach(
+    (k) => (base[k] = true)
+  );
+}
+
 
   // perms as ARRAY: supports ["*"] or explicit keys
   if (Array.isArray(u.perms)) {

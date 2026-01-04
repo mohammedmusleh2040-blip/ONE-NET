@@ -51,6 +51,9 @@ export default function Invoices() {
   const perms = useMemo(() => effectivePerms(), []);
   const user = currentUser?.() || null;
   const isSuper = (user?.role === 'super_admin') || perms?.super_admin === true;
+  const isSeller = String(user?.role || '').toLowerCase() === 'seller';
+  const [posMode, setPosMode] = useState(() => isSeller);
+  const [vendorStock, setVendorStock] = useState([]);
   const canEditInvoice = isSuper || perms?.invoices_edit === true;
   const canDeleteInvoice = isSuper || perms?.invoices_delete === true;
   const canRefundInvoice = isSuper || perms?.invoices_edit === true; // نفس صلاحية التعديل (أو سوبر)
@@ -78,6 +81,27 @@ export default function Invoices() {
   const [customers, setCustomers] = useState([]);
   const [unlinkedPaymentsByCustomer, setUnlinkedPaymentsByCustomer] = useState({});
   const [cards, setCards] = useState([]); // from v_card_balances
+
+  // ===== مصدر الكروت للواجهة =====
+  // الإدارة: cards (v_card_balances)
+  // البائع + وضع الكاشير (posMode): vendorStock (عهدة البائع) لكن السعر نأخذه من cards
+  const cardsForUi = useMemo(() => {
+    if (!(isSeller && posMode)) return cards;
+
+    const priceMap = new Map((cards || []).map((c) => [String(c.card_type_id), c]));
+    return (vendorStock || [])
+      .map((v) => {
+        const key = String(v.card_type_id);
+        const c = priceMap.get(key);
+        return {
+          card_type_id: v.card_type_id,
+          name: v.card_name || c?.name || `كرت ${v.card_type_id}`,
+          price: safeNum(c?.price ?? 0),
+          quantity: safeNum(v.qty ?? 0), // ✅ المتاح من العهدة
+        };
+      })
+      .filter((x) => x.card_type_id != null);
+  }, [isSeller, posMode, vendorStock, cards]);
   const [invoices, setInvoices] = useState([]);
 
   // ===== منع التكرار + وضع تعديل =====
@@ -116,6 +140,11 @@ export default function Invoices() {
 
   // Search in list
   const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invScope, setInvScope] = useState(() => (isSeller ? "seller" : "all"));
+
+  useEffect(() => {
+    if (isSeller) setInvScope("seller");
+  }, [isSeller]);
 
   // Pay modal
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -222,37 +251,132 @@ export default function Invoices() {
     }
   }
 
-  async function loadInvoices(customersList = customers) {
-    // view أولاً
-    const { data: vData, error: vErr } = await supabase
-      .from("v_invoices")
-      .select("*")
-      .order("id", { ascending: false });
+  
+  async function loadVendorStock() {
+    try {
+      if (!isSeller) { setVendorStock([]); return; }
+      // vendor_stock: seller_user_id (uuid) + card_type_id + qty
+      const { data, error } = await supabase
+        .from("vendor_stock")
+        .select("card_type_id, qty, card_name")
+        .eq("seller_user_id", user?.id || null)
+        .order("card_type_id", { ascending: true });
 
-    if (!vErr && vData) {
-      const norm = (vData || []).map((r) => ({
-        ...r,
-        total_before_discount: r.total_before_discount ?? 0,
-        discount_percent: r.discount_percent ?? 0,
-        discount_value: r.discount_value ?? 0,
-        total_after_discount: r.total_after_discount ?? 0,
-        paid_amount: r.paid_amount ?? 0,
-        remaining_amount: r.remaining_amount ?? 0,
-      }));
-      setInvoices(norm);
-      return;
+      if (error) throw error;
+      setVendorStock(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
+      // لا نوقف الصفحة لو جدول العهدة غير موجود بعد
+      setVendorStock([]);
     }
-
-    // fallback table
-    const { data, error } = await supabase
-      .from("invoices")
-      .select("id,number,customer_id,invoice_type,invoice_date,total_before_discount,discount_percent,discount_value,total_after_discount,paid_amount,remaining_amount,status,note,created_at")
-      .order("id", { ascending: false });
-    if (error) throw error;
-
-    const cm = new Map((customersList || []).map((c) => [c.id, c.name]));
-    setInvoices((data || []).map((x) => ({ ...x, customer_name: cm.get(x.customer_id) || "" })));
   }
+
+  async function rpcVendorMove({ seller_user_id, card_type_id, qty, noteText, created_at_iso, movement_type }) {
+    // RPC اسمها المقترح: vendor_stock_move
+    // تحاول بتوقيعين (مع created_at أو بدون)
+    let res = await supabase.rpc("vendor_stock_move", {
+      p_actor_id: user?.id || null,
+      p_actor_id: user?.id || null,
+      p_seller_user_id: seller_user_id,
+      p_card_type_id: Number(card_type_id),
+      p_movement_type: String(movement_type || "OUT").toUpperCase(),
+      p_qty: Number(qty),
+      p_note: noteText || null,
+      p_created_at: created_at_iso || null,
+    });
+    if (!res.error) return res.data;
+
+    res = await supabase.rpc("vendor_stock_move", {
+      p_actor_id: user?.id || null,
+      p_seller_user_id: seller_user_id,
+      p_card_type_id: Number(card_type_id),
+      p_movement_type: String(movement_type || "OUT").toUpperCase(),
+      p_qty: Number(qty),
+      p_note: noteText || null,
+    });
+    if (!res.error) return res.data;
+
+    throw res.error;
+  }
+
+  async function applyVendorOutByLines(invNumberOrId, invDateStr, invLines, sellerId) {
+    for (const l of invLines) {
+      const ctId = l.card_type_id;
+      const qty = safeNum(l.qty);
+      if (!ctId || qty <= 0) continue;
+      await rpcVendorMove({
+        seller_user_id: sellerId,
+        card_type_id: ctId,
+        movement_type: "OUT",
+        qty,
+        noteText: `خصم عهدة (بيع) فاتورة رقم ${invNumberOrId}`,
+        created_at_iso: invDateStr ? `${invDateStr}T12:00:00.000Z` : null,
+      });
+    }
+  }
+
+  async function applyVendorInByLines(invNumberOrId, invDateStr, invLines, sellerId, reasonTag) {
+    for (const l of invLines) {
+      const ctId = l.card_type_id;
+      const qty = safeNum(l.qty);
+      if (!ctId || qty <= 0) continue;
+      await rpcVendorMove({
+        seller_user_id: sellerId,
+        card_type_id: ctId,
+        movement_type: "IN",
+        qty,
+        noteText: `${reasonTag || "رجوع"} عهدة فاتورة ${invNumberOrId}`,
+        created_at_iso: invDateStr ? `${invDateStr}T12:00:00.000Z` : null,
+      });
+    }
+  }
+
+async function loadInvoices(customersList = customers) {
+  // view أولاً
+  let q = supabase
+    .from("v_invoices")
+    .select("*")
+    .order("id", { ascending: false });
+
+  // ✅ البائع يشوف فواتيره فقط
+  if (isSeller && user?.id) {
+    q = q.eq("seller_user_id", user.id);
+  }
+
+  const { data: vData, error: vErr } = await q;
+
+  if (!vErr && vData) {
+    const norm = (vData || []).map((r) => ({
+      ...r,
+      total_before_discount: r.total_before_discount ?? 0,
+      discount_percent: r.discount_percent ?? 0,
+      discount_value: r.discount_value ?? 0,
+      total_after_discount: r.total_after_discount ?? 0,
+      paid_amount: r.paid_amount ?? 0,
+      remaining_amount: r.remaining_amount ?? 0,
+    }));
+    setInvoices(norm);
+    return;
+  }
+
+  // fallback table
+  let q2 = supabase
+    .from("invoices")
+    .select("id,number,customer_id,invoice_type,invoice_date,total_before_discount,discount_percent,discount_value,total_after_discount,paid_amount,remaining_amount,status,note,created_at,seller_user_id")
+    .order("id", { ascending: false });
+
+  // ✅ إجبارية للبائع حتى لو فشل الـ view
+  if (isSeller && user?.id) {
+    q2 = q2.eq("seller_user_id", user.id);
+  }
+
+  const { data, error } = await q2;
+  if (error) throw error;
+
+  const cm = new Map((customersList || []).map((c) => [c.id, c.name]));
+  setInvoices((data || []).map((x) => ({ ...x, customer_name: cm.get(x.customer_id) || "" })));
+}
+
 
   // ===== Init =====
   useEffect(() => {
@@ -265,6 +389,7 @@ export default function Invoices() {
         const cs = await loadCustomers();
         await loadUnlinkedPayments();
         await loadCardBalances();
+        await loadVendorStock();
         await loadInvoices(cs);
       } catch (e) {
         console.error(e);
@@ -314,13 +439,13 @@ export default function Invoices() {
   // When selecting card: default price
   useEffect(() => {
     if (invoiceType !== "cards") return;
-    const c = cards.find((x) => String(x.card_type_id) === String(selCardId));
+    const c = cardsForUi.find((x) => String(x.card_type_id) === String(selCardId));
     if (c) setSelPrice(safeNum(c.price));
-  }, [selCardId, invoiceType, cards]);
+  }, [selCardId, invoiceType, cardsForUi]);
 
   // ===== Lines =====
   function addLine() {
-    const c = cards.find((x) => String(x.card_type_id) === String(selCardId));
+    const c = cardsForUi.find((x) => String(x.card_type_id) === String(selCardId));
     if (!c) return showToast("اختر كرت من المخزون", "warn");
 
     const qty = Math.max(1, safeNum(selQty));
@@ -549,6 +674,7 @@ export default function Invoices() {
         customer_id: Number(customerId),
         invoice_type: invoiceType,
         invoice_date: invoiceDate,
+        seller_user_id: posMode ? (user?.id || null) : null,
         total_before_discount: subtotal,
         discount_percent: Math.max(0, Math.min(100, safeNum(discountPercent))),
         discount_value: discountValue,
@@ -651,7 +777,13 @@ export default function Invoices() {
 
       if (String(invRow.invoice_type || "").toLowerCase() === "cards") {
         // رجوع IN عبر RPC
-        await revertCardInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, "رجوع (إلغاء)");
+        if (invRow?.seller_user_id) {
+          await applyVendorInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, invRow.seller_user_id, "رجوع (إلغاء)");
+          await loadVendorStock();
+        } else {
+          await revertCardInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, "رجوع (إلغاء)");
+          await loadCardBalances();
+        }
       }
 
       await zeroInvoice(inv.id, "VOID");
@@ -873,7 +1005,13 @@ try {
 
       if (String(invRow.invoice_type || "").toLowerCase() === "cards") {
         // رجوع IN عبر RPC (حذف)
-        await revertCardInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, "رجوع (حذف)");
+        if (invRow?.seller_user_id) {
+          await applyVendorInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, invRow.seller_user_id, "رجوع (حذف)");
+          await loadVendorStock();
+        } else {
+          await revertCardInByLines(invRow.number || invRow.id, invRow.invoice_date, invLines, "رجوع (حذف)");
+          await loadCardBalances();
+        }
       }
 
       const { error: eDelLines } = await supabase.from("invoice_line_items").delete().eq("invoice_id", inv.id);
@@ -904,9 +1042,21 @@ try {
       if (invoiceType === "cards") {
         if (lines.length === 0) return showToast("أضف بند واحد على الأقل", "warn");
         for (const l of lines) {
-          const c = cards.find((x) => String(x.card_type_id) === String(l.card_type_id));
-          if (!c) return showToast("خطأ: بند غير موجود في المخزون", "err");
-          if (!editMode && safeNum(l.qty) > safeNum(c.quantity)) return showToast(`الرصيد غير كافي للصنف: ${c.name}`, "warn");
+          const ctId = String(l.card_type_id || "");
+          const want = safeNum(l.qty);
+
+          if (!ctId || want <= 0) return showToast("كمية غير صحيحة", "warn");
+
+          if (posMode) {
+            const vs = (vendorStock || []).find((x) => String(x.card_type_id) === ctId);
+            const av = safeNum(vs?.qty);
+            if (!vs) return showToast("هذا الصنف غير موجود في عهدتك", "warn");
+            if (!editMode && want > av) return showToast(`رصيد العهدة غير كافي للصنف`, "warn");
+          } else {
+            const c = cards.find((x) => String(x.card_type_id) === ctId);
+            if (!c) return showToast("خطأ: بند غير موجود في المخزون", "err");
+            if (!editMode && want > safeNum(c.quantity)) return showToast(`الرصيد غير كافي للصنف: ${c.name}`, "warn");
+          }
         }
       } else {
         if (!isGigaCustomer) return showToast("فاتورة الجيجا فقط لعملاء giga", "warn");
@@ -925,6 +1075,7 @@ try {
         customer_id: Number(customerId),
         invoice_type: invoiceType,
         invoice_date: invoiceDate,
+        seller_user_id: posMode ? (user?.id || null) : null,
         total_before_discount: subtotal,
         discount_percent: Math.max(0, Math.min(100, safeNum(discountPercent))),
         discount_value: discountValue,
@@ -947,7 +1098,13 @@ try {
 
         // رجّع المخزون القديم إذا كانت كروت
         if (String(dbInv.invoice_type || "").toLowerCase() === "cards") {
-          await revertCardInByLines(dbInv.number || dbInv.id, dbInv.invoice_date, editOldLines, "تصحيح (رجوع قديم)");
+          if (dbInv?.seller_user_id) {
+            await applyVendorInByLines(dbInv.number || dbInv.id, dbInv.invoice_date, editOldLines, dbInv.seller_user_id, "تصحيح (رجوع قديم)");
+            await loadVendorStock();
+          } else {
+            await revertCardInByLines(dbInv.number || dbInv.id, dbInv.invoice_date, editOldLines, "تصحيح (رجوع قديم)");
+            await loadCardBalances();
+          }
         }
 
         // امسح البنود القديمة
@@ -973,7 +1130,19 @@ try {
           const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
           if (liErr) throw liErr;
 
+          if (posMode) {
+            await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
+            await loadVendorStock();
+          } else {
+            if (posMode) {
+          await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
+          await loadVendorStock();
+        } else {
           await applyCardOutByLines(invNumber, invoiceDate, lines);
+          await loadCardBalances();
+        }
+            await loadCardBalances();
+          }
         } else {
           const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
           const lineTotal = usage * safeNum(pricePerGb);
@@ -992,6 +1161,7 @@ try {
         }
 
         await loadCardBalances();
+        await loadVendorStock();
         await loadInvoices();
 
         showToast(`تم تعديل الفاتورة: ${invNumber}`, "ok");
@@ -1037,7 +1207,13 @@ try {
         if (liErr) throw liErr;
 
         // خصم OUT عبر RPC (ينشئ حركة ويحدث الرصيد)
-        await applyCardOutByLines(invNumber, invoiceDate, lines);
+        if (posMode) {
+          await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
+          await loadVendorStock();
+        } else {
+          await applyCardOutByLines(invNumber, invoiceDate, lines);
+          await loadCardBalances();
+        }
       } else {
         const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
         const lineTotal = usage * safeNum(pricePerGb);
@@ -1203,19 +1379,25 @@ try {
 
   // ===== Filter list =====
   const filteredInvoices = useMemo(() => {
+    let arr = invoices;
+
+    // فلتر المصدر (للإدارة فقط)
+    if (!isSeller) {
+      if (invScope === "seller") arr = arr.filter((x) => !!x.seller_user_id);
+      if (invScope === "admin") arr = arr.filter((x) => !x.seller_user_id);
+    }
+
     const q = invoiceSearch.trim().toLowerCase();
-    if (!q) return invoices;
-    return invoices.filter((inv) => {
-      const id = String(inv.id ?? "");
-      const num = String(inv.number ?? "").toLowerCase();
-      const name = String(inv.customer_name ?? "").toLowerCase();
-      const type = String(inv.invoice_type ?? "").toLowerCase();
-      const status = String(inv.status ?? "").toLowerCase();
-      const date = String(inv.invoice_date ?? "").toLowerCase();
-      const note = String(inv.note ?? "").toLowerCase();
-      return [id, num, name, type, status, date, note].some((x) => x.includes(q));
+    if (!q) return arr;
+
+    return arr.filter((inv) => {
+      const id = String(inv?.number || inv?.invoice_no || inv?.id || "").toLowerCase();
+      const customer = String(inv?.customer_name || inv?.customer || "").toLowerCase();
+      const type = String(inv?.invoice_type || inv?.type || "").toLowerCase();
+      const note = String(inv?.note || "").toLowerCase();
+      return id.includes(q) || customer.includes(q) || type.includes(q) || note.includes(q);
     });
-  }, [invoices, invoiceSearch]);
+  }, [invoices, invoiceSearch, invScope, isSeller]);
 
   const unpaidInvoices = useMemo(() => (filteredInvoices || []).filter((x) => safeNum(x.remaining_amount) > 0), [filteredInvoices]);
 
@@ -1268,6 +1450,16 @@ try {
         </div>
 
         <div style={styles.tabs}>
+          {isSeller && (
+            <button
+              className="btn btn-outline no-print"
+              onClick={() => setPosMode((v) => !v)}
+              title="وضع الكاشير: يخصم من عهدتك بدل المخزون العام"
+            >
+              🧾 وضع الكاشير: {posMode ? "مفعل" : "متوقف"}
+            </button>
+          )}
+
           <button onClick={() => setTab("create")} style={tab === "create" ? styles.tabActive : styles.tab}>
             إنشاء
           </button>
@@ -1306,6 +1498,7 @@ try {
                 const cs = await loadCustomers();
                 await loadUnlinkedPayments();
                 await loadCardBalances();
+        await loadVendorStock();
                 await loadInvoices(cs);
                 showToast("تم التحديث", "ok");
               } finally {
@@ -1444,7 +1637,7 @@ try {
                   نوع الكرت *
                   <select value={selCardId} onChange={(e) => setSelCardId(e.target.value)} style={styles.input}>
                     <option value="">اختر كرت...</option>
-                    {cards.map((c) => (
+                    {cardsForUi.map((c) => (
                       <option key={c.card_type_id} value={c.card_type_id}>
                         {c.name} — السعر: {money(c.price)} — المتاح: {c.quantity}
                       </option>
@@ -1575,7 +1768,19 @@ try {
         <div style={styles.card}>
           <div style={styles.subTitle}>سجل الفواتير</div>
 
-          <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {!isSeller && (
+              <select
+                value={invScope}
+                onChange={(e) => setInvScope(e.target.value)}
+                style={{ ...styles.input, width: 220, cursor: "pointer" }}
+              >
+                <option value="all">الكل</option>
+                <option value="seller">فواتير البائع</option>
+                <option value="admin">فواتير الإدارة</option>
+              </select>
+            )}
+
             <input
               value={invoiceSearch}
               onChange={(e) => setInvoiceSearch(e.target.value)}
@@ -1599,7 +1804,16 @@ try {
                     const st = statusUi(inv);
                     const isClosed = st.key === "void" || st.key === "refund";
                     return (
-                      <tr key={inv.id}><td>{inv.id}</td><td>{inv.number || "-"}</td><td>{inv.customer_name || "-"}</td><td>{String(inv.invoice_type).toLowerCase() === "cards" ? "كروت" : "جيجا"}</td><td>{inv.invoice_date || (inv.created_at ? String(inv.created_at).slice(0, 10) : "")}</td><td>{money(inv.total_after_discount)}</td><td>{money(inv.paid_amount)}</td><td>{money(inv.remaining_amount)}</td><td>
+                      <tr key={inv.id}><td>{inv.id}</td><td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "flex-end" }}>
+                        <span>{inv.number || "-"}</span>
+                        {inv?.seller_user_id ? (
+                          <span style={styles.badgeSeller}>بائع</span>
+                        ) : (
+                          <span style={styles.badgeAdmin}>إدارة</span>
+                        )}
+                      </div>
+                    </td><td>{inv.customer_name || "-"}</td><td>{String(inv.invoice_type).toLowerCase() === "cards" ? "كروت" : "جيجا"}</td><td>{inv.invoice_date || (inv.created_at ? String(inv.created_at).slice(0, 10) : "")}</td><td>{money(inv.total_after_discount)}</td><td>{money(inv.paid_amount)}</td><td>{money(inv.remaining_amount)}</td><td>
                           <span
                             style={
                               st.key === "paid"
@@ -1733,18 +1947,25 @@ try {
               <label style={styles.label}>
                 الطريقة
                 <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={styles.input}>
-                  <option value="cash">نقدي</option>
-                  <option value="transfer">تحويل</option>
-                  <option value="other">أخرى</option>
-                </select>
+  <option value="cash">نقدي</option>
+  <option value="transfer">تحويل</option>
+  <option value="from_balance">خصم من رصيد العميل</option>
+  <option value="other">أخرى</option>
+</select>
+
+                  <div style={{fontSize: 12, opacity: 0.75, marginTop: 6}}>
+                    إذا اخترت "خصم من رصيد العميل" فلن يُحسب ضمن النقد (الكاش)، لكنه يُسدد الفاتورة ويُنقص المتبقي.
+                  </div>
               </label>
             </div>
 
             <div style={styles.grid2}>
-              <label style={styles.label}>
-                مرجع (اختياري)
-                <input value={payRef} onChange={(e) => setPayRef(e.target.value)} style={styles.input} />
-              </label>
+              {payMethod !== "balance" && (
+                  <label style={styles.label}>
+                    مرجع (اختياري)
+                    <input style={styles.input} value={payRef} onChange={(e)=>setPayRef(e.target.value)} placeholder="رقم العملية / إيصال" />
+                  </label>
+                )}
               <label style={styles.label}>
                 ملاحظة (اختياري)
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} style={styles.input} />
@@ -1969,6 +2190,27 @@ const styles = {
     fontSize: 12,
     whiteSpace: "nowrap",
   },
+  badgeSeller: {
+    display: "inline-block",
+    padding: "4px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(30, 200, 120, 0.45)",
+    background: "rgba(30, 200, 120, 0.16)",
+    color: "var(--text)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+  badgeAdmin: {
+    display: "inline-block",
+    padding: "4px 10px",
+    borderRadius: 999,
+    border: "1px solid rgba(120, 120, 120, 0.35)",
+    background: "rgba(120, 120, 120, 0.12)",
+    color: "var(--text)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+
   modalBack: {
     position: "fixed",
     inset: 0,

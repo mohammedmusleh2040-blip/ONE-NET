@@ -83,6 +83,7 @@ export default function Layout() {
     { to: "/expenses", label: "المصروفات", icon: "cashflow", show: !!perms.expenses },
     { to: "/ledger", label: "التقارير", icon: "chart", show: !!perms.ledger },
     { to: "/stock", label: "المخزون", icon: "box", show: !!perms.stock },
+    { to: "/vendors", label: "عهدة الباعة", icon: "box", show: (!!perms.stock || !!perms.users) },
     { to: "/users", label: "المستخدمين", icon: "lock", show: !!perms.users },
     { to: "/settings", label: "الإعدادات", icon: "settings", show: !!perms.settings },
   ];

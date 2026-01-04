@@ -177,32 +177,47 @@ export default function Users() {
     try {
       if (!editingId) {
         // ✅ CREATE: مطابق للتوقيع
-        const payloadCreate = {
-          p_actor_id: actor,
-          p_username: username.trim(),
-          p_password: password.trim(),
-          p_role: role,
-          p_is_active: !!isActive,
-          p_perms: perms || {},
-        };
+       const payloadCreate = {
+  p_username: username.trim(),
+  p_password: password.trim(),
+  p_role: role,
+  p_is_active: !!isActive,       // ✅ لا تعكسها
+  p_perms: perms || {},
+  p_email: (email || "").trim() || null,
+};
 
-        const r = await supabase.rpc("app_users_create", payloadCreate);
-        if (r?.error) throw r.error;
+
+const { data, error } = await supabase
+  .rpc("app_user_create", payloadCreate);
+
+if (error) throw error;
+
 
         toastText(setMsg, "تم إضافة المستخدم بنجاح ✅", "ok");
         resetForm();
       } else {
         // ✅ UPDATE: مطابق للتوقيع
-        const payloadUpdate = {
-          p_actor_id: actor,
-          p_user_id: editingId,
-          p_username: username.trim(),
-          p_role: role,
-          p_is_active: !!isActive,
-          p_perms: perms || {},
-        };
+        const payloadCreate = {
+  p_username: username.trim(),
+  p_password: password.trim(),
+  p_role: role,
+  p_perms: perms || {},
+  p_email: email?.trim() || null,
+  p_is_active: !!isActive,
+};
 
-        const r = await supabase.rpc("app_users_update", payloadUpdate);
+
+        const r = editingId
+  ? await supabase.rpc("app_users_update", {
+      p_user_id: editingId,
+      p_username: username.trim(),
+      p_role: role,
+      p_perms: perms || {},
+      p_is_active: !!isActive,
+      p_email: email?.trim() || null,
+    })
+  : await supabase.rpc("app_user_create", payloadCreate);
+
         if (r?.error) throw r.error;
 
         // ✅ change password (اختياري)
@@ -348,6 +363,8 @@ export default function Users() {
                 <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>الدور</div>
                 <select style={inputStyle} value={role} onChange={(e) => setRole(e.target.value)}>
                   <option value="viewer">viewer</option>
+                  <option value="viewer">viewer</option>
+                  <option value="seller">seller</option>
                   <option value="manager">manager</option>
                   <option value="super_admin">super_admin</option>
                 </select>

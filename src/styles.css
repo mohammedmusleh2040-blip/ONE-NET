@@ -555,3 +555,16 @@ body.mobile-ui .nav-list{
   background-color: #ffffff;
   color: #111;
 }
+
+
+/* ===== Print helpers ===== */
+.no-print { }
+
+/* طباعة مرتبة */
+@media print {
+  .no-print { display: none !important; }
+  body { background: white !important; }
+  .card { box-shadow: none !important; border: 1px solid #ccc !important; }
+  table { width: 100% !important; border-collapse: collapse !important; }
+  th, td { border: 1px solid #000 !important; padding: 6px !important; text-align: center !important; }
+}
