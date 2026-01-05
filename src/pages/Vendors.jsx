@@ -228,15 +228,14 @@ export default function Vendors() {
     setLoading(true);
     try {
       const payload = {
-        p_actor_id: actorId,
-        p_seller_user_id: sellerId,
-        p_card_type_id: Number(cardTypeId),
-        p_movement_type: "assign",
-        p_qty: q,
-        p_note: (note || "").trim() || null,
+        p_actor_id: me?.id || null,
+        p_seller_user_id: sellerId || null,
+        p_card_type_id: cardTypeId ? Number(cardTypeId) : null,
+        p_movement_type: "IN",
+        p_qty: qty ? Number(qty) : null,
+        p_note: note || null,
         p_created_at: new Date().toISOString(),
       };
-
       const r = await supabase.rpc("vendor_stock_move", payload);
       if (r.error) throw r.error;
 
@@ -249,6 +248,40 @@ export default function Vendors() {
       toast(e?.message || String(e), "err");
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  // استرجاع عهدة (IN) من البائع إلى النظام
+  const submitReturn = async () => {
+    setErr("");
+    try {
+      if (!sellerId) return setErr("اختر البائع");
+      if (!cardTypeId) return setErr("اختر نوع الكرت");
+      const q = Number(qty);
+      if (!Number.isFinite(q) || q <= 0) return setErr("اكتب كمية صحيحة");
+
+      const payload = {
+        p_actor_id: me?.id || null,
+        p_seller_user_id: sellerId || null,
+        p_card_type_id: cardTypeId ? Number(cardTypeId) : null,
+        p_movement_type: "OUT",
+        p_qty: qty ? Number(qty) : null,
+        p_note: note || "استرجاع عهدة",
+        p_created_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.rpc("vendor_stock_move", payload);
+      if (error) throw error;
+
+      // تحديث الواجهة
+      setQty("");
+      setNote("");
+      await Promise.all([loadVendorBalances(), loadSettlement()]);
+      setOk("تم الاسترجاع بنجاح");
+      setTimeout(() => setOk(""), 2500);
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "حصل خطأ");
     }
   };
 
@@ -693,9 +726,19 @@ export default function Vendors() {
         </div>
 
         <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-start" }}>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button style={styles.btnPrimary} onClick={submitAssign} disabled={loading}>
-            تسليم
+            تسليم (OUT)
           </button>
+          <button
+            style={{ ...styles.btn, borderColor: "#0b6b53", color: "#0b6b53" }}
+            onClick={submitReturn}
+            disabled={loading}
+            title="استرجاع عهدة من البائع إلى النظام"
+          >
+            استرجاع (IN)
+          </button>
+        </div>
         </div>
 
         <div style={styles.divider} />

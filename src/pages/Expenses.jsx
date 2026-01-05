@@ -1,3 +1,4 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -66,6 +67,9 @@ export default function Expenses() {
 
   // Tabs: expenses/income vs salaries
   const [tab, setTab] = useState("expenses"); // 'expenses' | 'salaries'
+
+  // printing mode
+  const [printMode, setPrintMode] = useState("none"); // none | expenses | employee
 
   // Salary/Advance form
   const [salDate, setSalDate] = useState(todayISO());
@@ -331,11 +335,6 @@ export default function Expenses() {
     await loadRows();
   }
 
-  function printEmployeeStatement() {
-    // Print only the statement area
-    window.print();
-  }
-
   // ===== Statement computed =====
   const statementEmp = String(empFilter || "").trim();
   const statementRows = useMemo(() => {
@@ -355,17 +354,49 @@ export default function Expenses() {
     return { salary, advance, net: salary - advance };
   }, [statementRows]);
 
+  // ===== Printing =====
+  function printExpensesReport() {
+    // print only expenses report area (filtered rows + totals)
+    setPrintMode("expenses");
+    setTimeout(() => window.print(), 60);
+    setTimeout(() => setPrintMode("none"), 800);
+  }
+
+  function printEmployeeStatement() {
+    // print only employee statement area
+    setPrintMode("employee");
+    setTimeout(() => window.print(), 60);
+    setTimeout(() => setPrintMode("none"), 800);
+  }
+
+  const printMeta = useMemo(() => {
+    const fromD = from || todayISO();
+    const toD = to || todayISO();
+    return {
+      from: fromD,
+      to: toD,
+      at: new Date().toLocaleString("ar-SA"),
+    };
+  }, [from, to]);
+
   return (
-    <div className="page">
-      {/* Print CSS: print only .print-area */}
+    <div className="page" data-print-mode={printMode}>
+      {/* Print CSS: show only the chosen print area */}
       <style>{`
         @media print {
           .no-print { display: none !important; }
           body { background: #fff !important; }
           body * { visibility: hidden; }
-          .print-area, .print-area * { visibility: visible; }
-          .print-area { position: fixed; inset: 0; padding: 16px; }
-          .print-area .card { box-shadow: none !important; border: 1px solid #ddd; }
+          [data-print-area="expenses"], [data-print-area="expenses"] *,
+          [data-print-area="employee"], [data-print-area="employee"] * {
+            visibility: hidden;
+          }
+
+          /* Show selected area */
+          .print-show { position: fixed; inset: 0; padding: 16px; }
+          .print-show, .print-show * { visibility: visible !important; }
+
+          .print-card { box-shadow: none !important; border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
           table { width: 100%; border-collapse: collapse; }
           th, td { border: 1px solid #000; padding: 6px; text-align: center; }
         }
@@ -389,10 +420,16 @@ export default function Expenses() {
             <>
               <button className="btn" onClick={() => openNew("expense")}>+ مصروف</button>
               <button className="btn btn-outline" onClick={() => openNew("income")}>+ دخل</button>
+              <button className="btn btn-outline" onClick={printExpensesReport} disabled={loading || filtered.length === 0}>
+                🖨️ طباعة التقرير
+              </button>
             </>
           ) : (
             <>
               <button className="btn" onClick={saveSalary} disabled={loading}>+ إضافة راتب/سلفة</button>
+              <button className="btn btn-outline" onClick={printEmployeeStatement}>
+                🖨️ طباعة كشف الحساب
+              </button>
             </>
           )}
           <button className="btn btn-outline" onClick={loadRows} disabled={loading}>تحديث</button>
@@ -471,7 +508,7 @@ export default function Expenses() {
                 </div>
               </label>
 
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", justifyContent: "flex-end", flexWrap: "wrap" }}>
                 <div className="mini-card">
                   <div className="mini-title">إجمالي دخل</div>
                   <div className="mini-value">{money(totals.income)}</div>
@@ -648,6 +685,74 @@ export default function Expenses() {
               </div>
             </div>
           )}
+
+          {/* Printable Expenses Report */}
+          <div
+            data-print-area="expenses"
+            className={printMode === "expenses" ? "print-show" : ""}
+          >
+            {printMode === "expenses" && (
+              <div className="print-card">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 900 }}>تقرير المصروفات والدخل</div>
+                    <div style={{ marginTop: 4, fontSize: 12 }}>الفترة: {printMeta.from} → {printMeta.to}</div>
+                    <div style={{ marginTop: 4, fontSize: 12 }}>تاريخ الطباعة: {printMeta.at}</div>
+                  </div>
+                  <div style={{ textAlign: "left", fontSize: 12 }}>
+                    <div><b>إجمالي دخل:</b> {money(totals.income)}</div>
+                    <div><b>إجمالي مصروف:</b> {money(totals.expense)}</div>
+                    <div><b>الصافي:</b> {money(totals.net)}</div>
+                    <div><b>صافي الكاش:</b> {money(totals.cashNet)}</div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>التاريخ</th>
+                        <th>النوع</th>
+                        <th>البند</th>
+                        <th>الطريقة</th>
+                        <th>المبلغ</th>
+                        <th>ملاحظة</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.length ? (
+                        filtered.map((r, idx) => (
+                          <tr key={r.id}>
+                            <td>{idx + 1}</td>
+                            <td>{toDateOnly(r.expense_date)}</td>
+                            <td>{String(r.direction) === "income" ? "دخل" : "مصروف"}</td>
+                            <td>{r.category || "-"}</td>
+                            <td>{r.method || "-"}</td>
+                            <td>{money(r.amount)}</td>
+                            <td style={{ textAlign: "right" }}>{r.note || "-"}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr><td colSpan={7}>لا توجد بيانات</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", gap: 20 }}>
+                  <div style={{ width: "45%" }}>
+                    <div style={{ fontWeight: 800, marginBottom: 10 }}>التوقيع</div>
+                    <div style={{ borderBottom: "1px solid #000", height: 28 }} />
+                  </div>
+                  <div style={{ width: "45%" }}>
+                    <div style={{ fontWeight: 800, marginBottom: 10 }}>الختم</div>
+                    <div style={{ border: "1px dashed #000", height: 60, borderRadius: 8 }} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <>
@@ -775,53 +880,69 @@ export default function Expenses() {
           </div>
 
           {/* Printable Employee Statement */}
-          <div className="print-area">
-            <div className="card">
-              <div style={{ textAlign: "center", marginBottom: 10 }}>
-                <h2 style={{ margin: 0 }}>كشف حساب رواتب</h2>
-                <div style={{ marginTop: 6 }}>الموظف: <b>{statementEmp || "—"}</b></div>
-                <div style={{ marginTop: 4, fontSize: 12, color: "#444" }}>تاريخ الطباعة: {new Date().toLocaleString("ar-SA")}</div>
-              </div>
+          <div
+            data-print-area="employee"
+            className={printMode === "employee" ? "print-show" : ""}
+          >
+            {printMode === "employee" && (
+              <div className="print-card">
+                <div style={{ textAlign: "center", marginBottom: 10 }}>
+                  <h2 style={{ margin: 0 }}>كشف حساب رواتب</h2>
+                  <div style={{ marginTop: 6 }}>الموظف: <b>{statementEmp || "—"}</b></div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: "#444" }}>تاريخ الطباعة: {new Date().toLocaleString("ar-SA")}</div>
+                </div>
 
-              <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 10 }}>
-                <div><b>إجمالي الرواتب:</b> {money(statementTotals.salary)}</div>
-                <div><b>إجمالي السلف:</b> {money(statementTotals.advance)}</div>
-                <div><b>الصافي:</b> {money(statementTotals.net)}</div>
-              </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 10, flexWrap: "wrap" }}>
+                  <div><b>إجمالي الرواتب:</b> {money(statementTotals.salary)}</div>
+                  <div><b>إجمالي السلف:</b> {money(statementTotals.advance)}</div>
+                  <div><b>الصافي:</b> {money(statementTotals.net)}</div>
+                </div>
 
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>التاريخ</th>
-                    <th>النوع</th>
-                    <th>المبلغ</th>
-                    <th>ملاحظة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {statementEmp ? (
-                    statementRows.length ? (
-                      statementRows.map((r) => (
-                        <tr key={r.id}>
-                          <td>{toDateOnly(r.expense_date)}</td>
-                          <td>{r._kind === "advance" ? "سلفة" : "راتب"}</td>
-                          <td>{money(r.amount)}</td>
-                          <td>{r.note || "-"}</td>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>التاريخ</th>
+                      <th>النوع</th>
+                      <th>المبلغ</th>
+                      <th>ملاحظة</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statementEmp ? (
+                      statementRows.length ? (
+                        statementRows.map((r) => (
+                          <tr key={r.id}>
+                            <td>{toDateOnly(r.expense_date)}</td>
+                            <td>{r._kind === "advance" ? "سلفة" : "راتب"}</td>
+                            <td>{money(r.amount)}</td>
+                            <td style={{ textAlign: "right" }}>{r.note || "-"}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4}>لا توجد حركات لهذا الموظف ضمن الفترة</td>
                         </tr>
-                      ))
+                      )
                     ) : (
                       <tr>
-                        <td colSpan={4}>لا توجد حركات لهذا الموظف ضمن الفترة</td>
+                        <td colSpan={4}>اكتب اسم الموظف في خانة "اختر الموظف للطباعة" ثم اضغط طباعة</td>
                       </tr>
-                    )
-                  ) : (
-                    <tr>
-                      <td colSpan={4}>اكتب اسم الموظف في خانة "اختر الموظف للطباعة" ثم اضغط طباعة</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    )}
+                  </tbody>
+                </table>
+
+                <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", gap: 20 }}>
+                  <div style={{ width: "45%" }}>
+                    <div style={{ fontWeight: 800, marginBottom: 10 }}>التوقيع</div>
+                    <div style={{ borderBottom: "1px solid #000", height: 28 }} />
+                  </div>
+                  <div style={{ width: "45%" }}>
+                    <div style={{ fontWeight: 800, marginBottom: 10 }}>الختم</div>
+                    <div style={{ border: "1px dashed #000", height: 60, borderRadius: 8 }} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
