@@ -48,6 +48,34 @@ export default function Vendors() {
   const me = useMemo(() => currentUser?.() || null, []);
   const actorId = me?.id || null;
 
+// ===== password confirm (for sensitive actions) =====
+const [pwBusy, setPwBusy] = useState(false);
+const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
+  const username = me?.username || me?.user || me?.email || "";
+  if (!username) {
+    toast("لم يتم العثور على اسم المستخدم للتحقق", "err");
+    return false;
+  }
+  const password = window.prompt(`تأكيد كلمة المرور (${actionLabel})\nاكتب كلمة مرور المستخدم الحالي:`);
+  if (password == null) return false; // cancelled
+  if (!String(password).trim()) {
+    toast("كلمة المرور مطلوبة", "warn");
+    return false;
+  }
+  setPwBusy(true);
+  try {
+    const { error } = await supabase.rpc("app_login", { p_username: username, p_password: String(password) });
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast("كلمة المرور غير صحيحة أو لا يوجد اتصال", "err");
+    return false;
+  } finally {
+    setPwBusy(false);
+  }
+};
+
   // ===== UI state =====
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState("ok");
@@ -81,6 +109,11 @@ export default function Vendors() {
   // settlement data
   const [invoices, setInvoices] = useState([]);
   const [deposits, setDeposits] = useState([]);
+  const [editingDepId, setEditingDepId] = useState(null);
+  const [editDepDate, setEditDepDate] = useState(todayISO());
+  const [editDepAmount, setEditDepAmount] = useState("");
+  const [editDepNote, setEditDepNote] = useState("");
+
 
   const styles = useMemo(
     () => ({
@@ -219,23 +252,27 @@ export default function Vendors() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId, cardTypes]);
 
-  const submitAssign = async () => {
+  const submitAssign = async (movementType = "IN") => {
     if (!sellerId) return toast("اختر البائع أولاً", "warn");
     if (!cardTypeId) return toast("اختر نوع الكرت", "warn");
     const q = safeNum(qty);
     if (q <= 0) return toast("اكتب كمية صحيحة", "warn");
 
+    const ok = await confirmPassword("تسليم/استرجاع عهدة البائع");
+    if (!ok) return;
+
     setLoading(true);
     try {
       const payload = {
-        p_actor_id: me?.id || null,
-        p_seller_user_id: sellerId || null,
-        p_card_type_id: cardTypeId ? Number(cardTypeId) : null,
-        p_movement_type: "IN",
-        p_qty: qty ? Number(qty) : null,
-        p_note: note || null,
+        p_actor_id: actorId,
+        p_seller_user_id: sellerId,
+        p_card_type_id: Number(cardTypeId),
+        p_movement_type: movementType,
+        p_qty: q,
+        p_note: (note || "").trim() || null,
         p_created_at: new Date().toISOString(),
       };
+
       const r = await supabase.rpc("vendor_stock_move", payload);
       if (r.error) throw r.error;
 
@@ -248,40 +285,6 @@ export default function Vendors() {
       toast(e?.message || String(e), "err");
     } finally {
       setLoading(false);
-    }
-  };
-
-
-  // استرجاع عهدة (IN) من البائع إلى النظام
-  const submitReturn = async () => {
-    setErr("");
-    try {
-      if (!sellerId) return setErr("اختر البائع");
-      if (!cardTypeId) return setErr("اختر نوع الكرت");
-      const q = Number(qty);
-      if (!Number.isFinite(q) || q <= 0) return setErr("اكتب كمية صحيحة");
-
-      const payload = {
-        p_actor_id: me?.id || null,
-        p_seller_user_id: sellerId || null,
-        p_card_type_id: cardTypeId ? Number(cardTypeId) : null,
-        p_movement_type: "OUT",
-        p_qty: qty ? Number(qty) : null,
-        p_note: note || "استرجاع عهدة",
-        p_created_at: new Date().toISOString(),
-      };
-      const { data, error } = await supabase.rpc("vendor_stock_move", payload);
-      if (error) throw error;
-
-      // تحديث الواجهة
-      setQty("");
-      setNote("");
-      await Promise.all([loadVendorBalances(), loadSettlement()]);
-      setOk("تم الاسترجاع بنجاح");
-      setTimeout(() => setOk(""), 2500);
-    } catch (e) {
-      console.error(e);
-      setErr(e?.message || "حصل خطأ");
     }
   };
 
@@ -464,25 +467,59 @@ export default function Vendors() {
   const [depAmount, setDepAmount] = useState("");
   const [depNote, setDepNote] = useState("");
 
-  
   const addDeposit = async () => {
     const sid = depSellerId || settleSellerId || sellerId;
     if (!sid) return toast("اختر البائع للتوريد", "warn");
     const a = safeNum(depAmount);
     if (a <= 0) return toast("اكتب مبلغ صحيح", "warn");
 
+    const ok = await confirmPassword("حفظ توريد نقد");
+    if (!ok) return;
+
     setLoading(true);
     try {
-      const ins = await supabase.from("seller_deposits").insert([
-        {
-          actor_id: actorId,
-          seller_user_id: sid,
-          deposit_date: depDate,
-          amount: a,
-          note: (depNote || "").trim() || null,
-        },
-      ]);
+      
+      const ins = await supabase
+        .from("seller_deposits")
+        .insert([
+          {
+            actor_id: actorId,
+            seller_user_id: sid,
+            deposit_date: depDate,
+            amount: a,
+            note: (depNote || "").trim() || null,
+          },
+        ])
+        .select("id")
+        .single();
+
       if (ins.error) throw ins.error;
+
+      // mirror into payments so it يظهر في تقرير النقد + الداشبورد + تقرير البائع
+      const depId = ins.data?.id;
+      const tag = `[DEP][seller:${sid}][dep:${depId}]`;
+      const payNote = [tag, (depNote || "").trim()].filter(Boolean).join(" | ");
+
+      const basePay = {
+        customer_id: null,
+        invoice_id: null,
+        pay_date: depDate,
+        amount: a,
+        payment_type: "vendor_deposit",
+        method: "cash",
+        reference: sellerName(sid) || null,
+        note: payNote || null,
+      };
+
+      // إذا payments عندك فيها created_by/source نضيفها، وإذا لا نعيد بدونها
+      let payIns = await supabase.from("payments").insert([
+        { ...basePay, created_by: actorId || null, source: "vendor_deposit" },
+      ]);
+
+      if (payIns.error && String(payIns.error?.message || "").includes("schema cache")) {
+        payIns = await supabase.from("payments").insert([basePay]);
+      }
+      if (payIns.error) throw payIns.error;
 
       toast("تم حفظ التوريد ✅", "ok");
       setDepAmount("");
@@ -497,167 +534,90 @@ export default function Vendors() {
     }
   };
 
-  // ✅ طباعة عهدة البائع (A4 احترافية) + إجمالي + توقيع/ختم + اسم المستخدم ووقت رسمي
-  const openPrintCustody = () => {
-    const sid = sellerId || "";
-    if (!sid) {
-      toast("اختر بائع أولاً لطباعة العهدة", "warn");
-      return;
+  // ===== Deposits CRUD (تعديل/حذف التوريد) + sync payments =====
+  const updateDeposit = async (dep) => {
+    if (!dep?.id) return;
+    const a = safeNum(dep.amount);
+    if (a <= 0) return toast("اكتب مبلغ صحيح", "warn");
+
+    const ok = await confirmPassword("تعديل توريد نقد");
+    if (!ok) return;
+
+    setLoading(true);
+    try {
+      const up = await supabase
+        .from("seller_deposits")
+        .update({
+          deposit_date: dep.deposit_date,
+          amount: a,
+          note: (dep.note || "").trim() || null,
+        })
+        .eq("id", dep.id);
+
+      if (up.error) throw up.error;
+
+      // update mirrored payment row (match by tag)
+      const tag = `[DEP][seller:${dep.seller_user_id}][dep:${dep.id}]`;
+      const payNote = [tag, (dep.note || "").trim()].filter(Boolean).join(" | ");
+
+      // try update with/without extra cols
+      let payUp = await supabase
+        .from("payments")
+        .update({
+          pay_date: dep.deposit_date,
+          amount: a,
+          reference: sellerName(dep.seller_user_id) || null,
+          note: payNote || null,
+        })
+        .ilike("note", `%${tag}%`);
+
+      if (payUp.error && String(payUp.error?.message || "").includes("schema cache")) {
+        payUp = await supabase
+          .from("payments")
+          .update({
+            pay_date: dep.deposit_date,
+            amount: a,
+            reference: sellerName(dep.seller_user_id) || null,
+            note: payNote || null,
+          })
+          .ilike("note", `%${tag}%`);
+      }
+      if (payUp.error) throw payUp.error;
+
+      toast("تم تعديل التوريد ✅", "ok");
+      await calcSettlement();
+    } catch (e) {
+      console.error(e);
+      toast(e?.message || String(e), "err");
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const printedBy = (me?.username || me?.email || actorId || "").toString();
-    const printedAt = nowText();
+  const deleteDeposit = async (dep) => {
+    if (!dep?.id) return;
+    if (!confirm("حذف هذا التوريد؟")) return;
 
-    const rows = (balances || []).map((b) => ({
-      card: b.card_name || cardName(b.card_type_id),
-      qty: safeNum(b.qty),
-      price: safeNum(b.price ?? 0),
-      value: safeNum(b.qty) * safeNum(b.price ?? 0),
-    }));
+    setLoading(true);
+    try {
+      const del = await supabase.from("seller_deposits").delete().eq("id", dep.id);
+      if (del.error) throw del.error;
 
-    const totalQty = rows.reduce((a, r) => a + safeNum(r.qty), 0);
-    const totalValue = rows.reduce((a, r) => a + safeNum(r.value), 0);
+      const tag = `[DEP][seller:${dep.seller_user_id}][dep:${dep.id}]`;
+      const payDel = await supabase.from("payments").delete().ilike("note", `%${tag}%`);
+      if (payDel.error && !String(payDel.error?.message || "").includes("schema cache")) {
+        // إذا ما قدرنا نحذف من payments بسبب اختلاف سكيمة، ما نكسر — بس نبلغك
+        console.warn(payDel.error);
+      }
 
-    const title = `عهدة البائع: ${sellerName(sid)}`;
-
-    const html = `
-<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>${title}</title>
-<style>
-  @page { size: A4; margin: 12mm; }
-  * { box-sizing: border-box; }
-  body { font-family: Arial, "Tajawal", sans-serif; color:#111; margin:0; }
-  .sheet { width: 100%; }
-  .header {
-    display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
-    border:1px solid #e5e5e5; border-radius:14px; padding:12px 14px;
-  }
-  .brand { font-weight:900; font-size:16px; line-height:1.35; }
-  .sub { font-size:12px; opacity:.75; margin-top:2px; }
-  .meta { font-size:12px; line-height:1.8; text-align:left; }
-  .meta b { font-weight:800; }
-  .kpis { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin:12px 0; }
-  .kpi { border:1px solid #e5e5e5; border-radius:14px; padding:10px; }
-  .kpi .t { font-size:12px; opacity:.7; margin-bottom:6px; }
-  .kpi .v { font-size:18px; font-weight:900; }
-  table { width:100%; border-collapse: collapse; font-size:12px; }
-  th, td { border:1px solid #e5e5e5; padding:8px; text-align:right; vertical-align:middle; }
-  th { background:#fafafa; font-weight:800; }
-  .right { text-align:right; }
-  .left { text-align:left; }
-  .muted { opacity:.7; }
-  .footer {
-    margin-top:12px;
-    display:grid; grid-template-columns: 1fr 1fr; gap:12px;
-  }
-  .box {
-    border:1px solid #e5e5e5; border-radius:14px; padding:12px;
-    min-height: 92px;
-  }
-  .box .t { font-weight:900; margin-bottom:10px; }
-  .line { border-bottom:1px dashed #bbb; height: 18px; margin-top:12px; }
-  .stamp {
-    border:2px dashed #bbb; border-radius:12px; height: 70px;
-    display:flex; align-items:center; justify-content:center; color:#666; font-weight:800;
-  }
-  .note {
-    margin-top:10px; font-size:11px; opacity:.75; line-height:1.6;
-  }
-  .printbtn { margin-top:12px; padding:10px 14px; border-radius:10px; border:1px solid #ddd; background:white; cursor:pointer; }
-  @media print { .no-print { display:none !important; } }
-</style>
-</head>
-<body>
-  <div class="sheet">
-    <div class="header">
-      <div>
-        <div class="brand">ONE NET ERP</div>
-        <div class="sub">نموذج عهدة بائع (Vendor Custody Sheet)</div>
-      </div>
-      <div class="meta">
-        <div><b>البائع:</b> ${sellerName(sid)}</div>
-        <div><b>وقت الطباعة:</b> ${printedAt}</div>
-        <div><b>طُبع بواسطة:</b> ${String(printedBy).replace(/</g,"&lt;")}</div>
-        <div class="muted">المصدر: v_vendor_stock</div>
-      </div>
-    </div>
-
-    <div class="kpis">
-      <div class="kpi"><div class="t">عدد الأصناف</div><div class="v">${rows.length}</div></div>
-      <div class="kpi"><div class="t">إجمالي الكمية</div><div class="v">${money(totalQty)}</div></div>
-      <div class="kpi"><div class="t">إجمالي القيمة</div><div class="v">${money(totalValue)}</div></div>
-    </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th style="width:40px">#</th>
-          <th>الكرت</th>
-          <th style="width:90px">السعر</th>
-          <th style="width:90px">الكمية</th>
-          <th style="width:110px">الإجمالي</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((r,i)=>`
-          <tr>
-            <td>${i+1}</td>
-            <td>${String(r.card||"").replace(/</g,"&lt;")}</td>
-            <td>${money(r.price)}</td>
-            <td style="font-weight:900">${money(r.qty)}</td>
-            <td style="font-weight:900">${money(r.value)}</td>
-          </tr>
-        `).join("")}
-        ${rows.length ? "" : `<tr><td colspan="5" class="muted">لا توجد عهدة للبائع.</td></tr>`}
-      </tbody>
-      <tfoot>
-        <tr>
-          <th colspan="3" class="left">الإجمالي</th>
-          <th>${money(totalQty)}</th>
-          <th>${money(totalValue)}</th>
-        </tr>
-      </tfoot>
-    </table>
-
-    <div class="footer">
-      <div class="box">
-        <div class="t">توقيع المستلم (البائع)</div>
-        <div class="muted">الاسم:</div>
-        <div class="line"></div>
-        <div class="muted">التوقيع:</div>
-        <div class="line"></div>
-      </div>
-
-      <div class="box">
-        <div class="t">اعتماد الإدارة</div>
-        <div class="muted">الاسم / التوقيع:</div>
-        <div class="line"></div>
-        <div class="muted">الختم:</div>
-        <div class="stamp">STAMP / ختم</div>
-      </div>
-    </div>
-
-    <div class="note">
-      * هذه الوثيقة للمتابعة الداخلية. في حال وجود أي اختلاف يرجى مراجعة الإدارة فوراً.<br/>
-      * تم إنشاء هذا التقرير تلقائياً من النظام.
-    </div>
-
-    <div class="no-print">
-      <button class="printbtn" onclick="window.print()">طباعة</button>
-    </div>
-  </div>
-</body>
-</html>`;
-
-    const w = window.open("", "_blank");
-    if (!w) return toast("المتصفح منع نافذة الطباعة", "warn");
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+      toast("تم حذف التوريد ✅", "ok");
+      await calcSettlement();
+    } catch (e) {
+      console.error(e);
+      toast(e?.message || String(e), "err");
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -666,10 +626,10 @@ export default function Vendors() {
       <div style={styles.headerRow}>
         <div style={styles.h1}>البائعين / العهد</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button style={styles.btn} onClick={refreshLists} disabled={loading}>
+          <button style={styles.btn} onClick={refreshLists} disabled={loading || pwBusy}>
             تحديث
           </button>
-          <button style={styles.btn} onClick={openPrint} disabled={loading}>
+          <button style={styles.btn} onClick={openPrint} disabled={loading || pwBusy}>
             طباعة
           </button>
         </div>
@@ -679,11 +639,6 @@ export default function Vendors() {
       <div style={styles.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div style={{ fontWeight: 900 }}>إضافة عهدة (تسليم كروت للبائع)</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} className="no-print">
-            <button style={styles.btn} onClick={openPrintCustody} disabled={loading}>
-              طباعة العهدة
-            </button>
-          </div>
           <div style={{ fontSize: 12, opacity: 0.65 }}>
             يتم الخصم من مخزون الكروت (المخزون النهائي) + يُضاف لرصيد البائع.
           </div>
@@ -725,20 +680,13 @@ export default function Vendors() {
           </div>
         </div>
 
-        <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-start" }}>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-          <button style={styles.btnPrimary} onClick={submitAssign} disabled={loading}>
-            تسليم (OUT)
+        <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-start", flexWrap: "wrap" }}>
+          <button style={styles.btnPrimary} onClick={() => submitAssign("IN")} disabled={loading || pwBusy}>
+            تسليم (IN)
           </button>
-          <button
-            style={{ ...styles.btn, borderColor: "#0b6b53", color: "#0b6b53" }}
-            onClick={submitReturn}
-            disabled={loading}
-            title="استرجاع عهدة من البائع إلى النظام"
-          >
-            استرجاع (IN)
+          <button style={styles.btn} onClick={() => submitAssign("OUT")} disabled={loading || pwBusy}>
+            استرجاع عهدة (OUT)
           </button>
-        </div>
         </div>
 
         <div style={styles.divider} />
@@ -777,12 +725,7 @@ export default function Vendors() {
 
       {/* ===== Card: Settlement ===== */}
       <div style={styles.card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-  <div style={{ fontWeight: 900, marginBottom: 10 }}>تسوية البائع (الفواتير + التوريدات)</div>
-  <div className="no-print">
-    <button style={styles.btn} onClick={openPrint} disabled={loading}>طباعة التسوية</button>
-  </div>
-</div>
+        <div style={{ fontWeight: 900, marginBottom: 10 }}>تسوية البائع (الفواتير + التوريدات)</div>
 
         <div style={styles.grid4}>
           <div>
@@ -808,7 +751,7 @@ export default function Vendors() {
           </div>
 
           <div style={{ display: "flex", alignItems: "flex-end" }}>
-            <button style={styles.btnPrimary} onClick={calcSettlement} disabled={loading}>
+            <button style={styles.btnPrimary} onClick={calcSettlement} disabled={loading || pwBusy}>
               تحديث التسوية
             </button>
           </div>
@@ -905,7 +848,7 @@ export default function Vendors() {
           </div>
         </div>
         <div style={{ marginTop: 12 }}>
-          <button style={styles.btnPrimary} onClick={addDeposit} disabled={loading}>
+          <button style={styles.btnPrimary} onClick={addDeposit} disabled={loading || pwBusy}>
             حفظ التوريد
           </button>
         </div>
@@ -919,18 +862,101 @@ export default function Vendors() {
                 <th style={styles.th}>اليوم</th>
                 <th style={styles.th}>المبلغ</th>
                 <th style={styles.th}>ملاحظة</th>
+                <th style={styles.th}>إجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {deposits.map((x, i) => (
-                <tr key={x.id}>
-                  <td style={styles.td}>{i + 1}</td>
-                  <td style={styles.td}>{x.deposit_date}</td>
-                  <td style={styles.td}>{money(x.amount)}</td>
-                  <td style={styles.td}>{x.note || ""}</td>
-                </tr>
-              ))}
-              {!deposits.length && (
+              {deposits.map((x, i) => {
+                const isEdit = editingDepId === x.id;
+                return (
+                  <tr key={x.id}>
+                    <td style={styles.td}>{i + 1}</td>
+                    <td style={styles.td}>
+                      {isEdit ? (
+                        <input
+                          type="date"
+                          value={editDepDate}
+                          onChange={(e) => setEditDepDate(e.target.value)}
+                          style={styles.input}
+                        />
+                      ) : (
+                        x.deposit_date
+                      )}
+                    </td>
+                    <td style={styles.td}>
+                      {isEdit ? (
+                        <input
+                          value={editDepAmount}
+                          onChange={(e) => setEditDepAmount(e.target.value)}
+                          placeholder="0"
+                          style={styles.input}
+                        />
+                      ) : (
+                        money(x.amount)
+                      )}
+                    </td>
+                    <td style={styles.td}>
+                      {isEdit ? (
+                        <input
+                          value={editDepNote}
+                          onChange={(e) => setEditDepNote(e.target.value)}
+                          placeholder="ملاحظة"
+                          style={styles.input}
+                        />
+                      ) : (
+                        x.note || ""
+                      )}
+                    </td>
+                    <td style={styles.td}>
+                      {!isEdit ? (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap" }}>
+                          <button
+                            style={styles.btn}
+                            onClick={() => {
+                              setEditingDepId(x.id);
+                              setEditDepDate(x.deposit_date);
+                              setEditDepAmount(String(x.amount ?? ""));
+                              setEditDepNote(x.note || "");
+                            }}
+                            disabled={loading || pwBusy}
+                          >
+                            تعديل
+                          </button>
+                          <button style={styles.btnDanger} onClick={() => deleteDeposit(x)} disabled={loading || pwBusy}>
+                            حذف
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap" }}>
+                          <button
+                            style={styles.btnPrimary}
+                            onClick={() =>
+                              updateDeposit({
+                                ...x,
+                                deposit_date: editDepDate,
+                                amount: editDepAmount,
+                                note: editDepNote,
+                              })
+                            }
+                            disabled={loading || pwBusy}
+                          >
+                            حفظ
+                          </button>
+                          <button
+                            style={styles.btn}
+                            onClick={() => {
+                              setEditingDepId(null);
+                            }}
+                            disabled={loading || pwBusy}
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}{!deposits.length && (
                 <tr>
                   <td style={styles.td} colSpan={4}>
                     لا توجد توريدات مسجلة ضمن الفترة.
