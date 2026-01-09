@@ -230,26 +230,75 @@ export default function Invoices() {
     return map;
   }
 
+  
   async function loadCardBalances() {
-    const { data, error } = await supabase.from("v_card_balances").select("*");
-    if (error) throw error;
+    // ✅ مصدر واحد للعرض: ندمج (الرصيد من v_card_balances) + (الاسم/السعر من card_types)
+    const [{ data: balData, error: balErr }, typeRes1] = await Promise.all([
+      supabase.from("v_card_balances").select("*"),
+      // نحاول أولاً بجلب selling_price (لو موجود في بعض النسخ)، وإذا غير موجود نرجع price فقط
+      supabase.from("card_types").select("id,name,price,selling_price").order("id", { ascending: true }),
+    ]);
 
-    const mapped = (data || [])
-      .map((r) => ({
-        card_type_id: r.card_type_id ?? r.ct_id ?? r.id ?? null,
-        name: r.name ?? r.card_name ?? r.card_type_name ?? "",
-        price: safeNum(r.price ?? r.selling_price ?? 0),
-        quantity: safeNum(r.quantity ?? r.qty ?? r.balance ?? 0),
-      }))
-      .filter((x) => x.card_type_id != null);
+    if (balErr) throw balErr;
 
-    setCards(mapped);
+    let typesData = typeRes1?.data || [];
+    let typesErr = typeRes1?.error;
 
-    if (!selCardId && mapped.length) {
-      setSelCardId(String(mapped[0].card_type_id));
-      setSelPrice(mapped[0].price);
+    if (typesErr) {
+      // 42703 = column does not exist (مثل selling_price)
+      if (typesErr.code === "42703" || String(typesErr.message || "").includes("does not exist")) {
+        const typeRes2 = await supabase
+          .from("card_types")
+          .select("id,name,price")
+          .order("id", { ascending: true });
+        typesData = typeRes2.data || [];
+        typesErr = typeRes2.error;
+      }
+    }
+
+    if (typesErr) {
+      console.warn("card_types load warning:", typesErr);
+      typesData = typesData || [];
+    }
+
+    // maps
+    const typeMap = {};
+    (typesData || []).forEach((t) => {
+      const id = t?.id;
+      if (id == null) return;
+      typeMap[String(id)] = {
+        name: t?.name ?? "",
+        price: safeNum(t?.selling_price ?? t?.price ?? 0),
+      };
+    });
+
+    const balMap = {};
+    (balData || []).forEach((r) => {
+      const id = r.card_type_id ?? r.ct_id ?? r.id ?? null;
+      if (id == null) return;
+      balMap[String(id)] = safeNum(r.quantity ?? r.qty ?? r.balance ?? 0);
+    });
+
+    // ادمجهم بنفس ترتيب card_types (حتى تظهر كل الأنواع)
+    const merged = (typesData || []).map((t) => {
+      const id = String(t.id);
+      const meta = typeMap[id] || { name: "", price: 0 };
+      return {
+        card_type_id: t.id,
+        name: meta.name,
+        price: meta.price,
+        quantity: safeNum(balMap[id] ?? 0),
+      };
+    });
+
+    setCards(merged);
+
+    if (!selCardId && merged.length) {
+      setSelCardId(String(merged[0].card_type_id));
+      setSelPrice(merged[0].price);
     }
   }
+
 
   
   async function loadVendorStock() {

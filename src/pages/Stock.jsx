@@ -35,7 +35,10 @@ export default function Stock() {
   const filteredBalances = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return balances;
-    return balances.filter((r) => (r.name || "").toLowerCase().includes(s));
+    return balances.filter((r) => {
+      const nm = (r.name || r.card_type_name || r.card_name || "").toLowerCase();
+      return nm.includes(s);
+    });
   }, [balances, q]);
 
   // ====== Add Type
@@ -129,14 +132,21 @@ export default function Stock() {
       // Enrich balances with per-card thresholds (from card_types)
       const { data: trows, error: et } = await supabase
         .from("card_types")
-        .select("id, low_stock_threshold, alert_qty, low_stock_alert");
+        // Include name + price because some stock views don't expose them
+        .select("id, name, price, low_stock_threshold, alert_qty, low_stock_alert");
       if (et) throw et;
 
       const tmap = new Map((trows || []).map((r) => [Number(r.id), r]));
       const enriched = (b || []).map((row) => {
         const t = tmap.get(Number(row.card_type_id));
+        const name = row.name || row.card_type_name || (t && t.name) || null;
+        const price = row.price ?? (t && t.price) ?? 0;
+        const quantity = row.quantity ?? row.stock_qty ?? row.current_qty ?? row.balance ?? 0;
         return {
           ...row,
+          name,
+          price,
+          quantity,
           low_stock_threshold:
             (t && (t.low_stock_threshold ?? t.alert_qty)) ?? row.low_stock_threshold,
           alert_qty: (t && t.alert_qty) ?? row.alert_qty,
@@ -148,7 +158,7 @@ export default function Stock() {
 
 
       // Movements: some DB views might not include the card type name, so we fallback safely.
-      const typeNameById = new Map((enriched || []).map((t) => [String(t.card_type_id), t.name]));
+      const typeNameById = new Map((enriched || []).map((t) => [String(t.card_type_id), t.name || t.card_type_name]));
 
       let movementsRows = [];
       const { data: m, error: em } = await supabase
@@ -731,7 +741,7 @@ export default function Stock() {
                     {filteredMovements.map((m, idx) => (
                       <tr key={m.id} style={{ background: rowBg(m.note) }}>
       <td>{idx + 1}</td>
-      <td>{m.card_name || m.card || "-"}</td>
+      <td>{m.card_type_name || m.card_name || m.card_name_ar || m.name || m.card || "-"}</td>
       <td style={{ fontWeight: 800 }}>{(m.movement_type || "").toUpperCase()}</td>
       <td style={{ fontWeight: 800 }}>
         {m.movement_type === "IN" ? "+" : "-"} {safeNum(m.qty)}
