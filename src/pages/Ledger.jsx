@@ -128,11 +128,6 @@ export default function Ledger() {
   async function loadMovements() {
     setLoading(true);
     try {
-      // inclusive to => add 1 day, use lt
-      const dTo = new Date(to);
-      dTo.setDate(dTo.getDate() + 1);
-      const toPlus1 = dTo.toISOString().slice(0, 10);
-
       // 1) try view first
       let viewOk = true;
       let data = null;
@@ -141,12 +136,12 @@ export default function Ledger() {
         let vq = supabase
           .from("v_card_movements")
           .select("*")
-          .gte("created_at", from)
-          .lt("created_at", toPlus1)
+          .gte("movement_date", from)
+          .lte("movement_date", to)
+          .order("movement_date", { ascending: false })
           .order("created_at", { ascending: false });
 
         // إجبارية للبائع (fallback)
-        if (isSeller && authUser?.id) tq = tq.eq("seller_user_id", authUser.id);
 
         // إجبارية للبائع
         if (isSeller && authUser?.id) vq = vq.eq("seller_user_id", authUser.id);
@@ -166,18 +161,23 @@ export default function Ledger() {
 
       // 2) fallback to table
       if (!viewOk) {
+        // بناء الاستعلام من الجدول الأساسي
         let tq = supabase
           .from("card_movements")
-          .select('id,card_type_id,movement_type,qty,"before","after",note,created_at,card_types(name)')
-          .gte("created_at", from)
-          .lt("created_at", toPlus1)
+          .select('id,card_type_id,movement_type,qty,"before","after",note,created_at,invoice_id,card_types(name)')
+          .gte("movement_date", from)
+          .lte("movement_date", to)
+          .order("movement_date", { ascending: false })
           .order("created_at", { ascending: false });
 
-        // إجبارية للبائع
-        if (isSeller && authUser?.id) vq = vq.eq("seller_user_id", authUser.id);
+        // فلتر نوع الكرت
+        if (cardTypeId) tq = tq.eq("card_type_id", cardTypeId);
 
-        if (cardTypeId !== "all") tq = tq.eq("card_type_id", cardTypeId);
-        if (mType !== "all") tq = tq.eq("movement_type", mType);
+        // فلتر IN/OUT
+        if (movementType && movementType !== "ALL") tq = tq.eq("movement_type", movementType);
+
+        // إجبارية للبائع
+        if (isSeller && authUser?.id) tq = tq.eq("seller_user_id", authUser.id);
 
         const res = await tq;
         if (res.error) throw res.error;
@@ -196,39 +196,65 @@ export default function Ledger() {
 
   // normalize card moves (View or Table)  ✅ مهم: هذا كان مخرب بالنسخة السابقة (اختلاط الأقواس داخل useMemo)
   const normalizedMoves = useMemo(() => {
-    return (moves || []).map((r) => {
-      const cardName = pick(r, ["card_name", "card_type_name", "name"], "") || pick(r?.card_types, ["name"], "-");
+    const baseRows = (moves || []).map((r, idx) => {
+      const created =
+        r.created_at || r.date || r.movement_date || r.createdAt || r.created || null;
+      const movementType =
+        r.movement_type || r.type || r.movement || r.direction || "";
 
-      const invoiceNo =
-        pick(r, ["invoice_number", "invoice_no", "invoice_code"], "") ||
-        (r.invoice_id ? `INV-${String(r.invoice_id).padStart(6, "0")}` : "");
-
-      const customerName = pick(r, ["customer_name", "customer"], "");
-
-      const src =
-        pick(r, ["source", "source_type"], "") ||
-        (invoiceNo ? "فاتورة" : String(r.note || "").includes("INV-") ? "فاتورة" : "مخزون");
-
-      // قبل/بعد (قد تكون before/after أو before_qty/after_qty)
-      const beforeQty = pick(r, ['"before"', "before", "before_qty", "balance_before"], "");
-      const afterQty = pick(r, ['"after"', "after", "after_qty", "balance_after"], "");
+      const qty = Number(r.qty ?? r.quantity ?? r.amount ?? 0) || 0;
 
       return {
-        id: r.id,
-        created_at: r.created_at,
-        movement_type: r.movement_type,
-        qty: safeNum(r.qty ?? r.quantity),
-        card_type_id: r.card_type_id,
-        card_name: cardName || "-",
-        source: src || "-",
-        invoice_no: invoiceNo || "-",
-        customer_name: customerName || "-",
-        before_qty: beforeQty,
-        after_qty: afterQty,
-        note: r.note || pick(r, ["remarks", "memo"], "") || "",
-        raw: r,
+        ...r,
+        _idx: idx,
+        created_at: created,
+        movement_type: movementType,
+        qty,
+        card_type_id:
+          r.card_type_id ?? r.cardTypeId ?? r.card_type ?? r.card_id ?? null,
+        card_name: r.card_name ?? r.card ?? r.name ?? r.cardTypeName ?? "",
+        customer_name: r.customer_name ?? r.customer ?? "",
+        invoice_no: r.invoice_no ?? r.invoice_number ?? r.invoice ?? "",
+        source: r.source ?? r.src ?? "",
+        note: r.note ?? r.notes ?? "",
+        // قد تأتي من View جاهز، وإذا غير موجودة سنحسبها
+        before_qty: r.before_qty ?? r.before ?? null,
+        after_qty: r.after_qty ?? r.after ?? null,
       };
     });
+
+    // نحسب الرصيد (قبل/بعد) لكل كرت حسب الترتيب الزمني
+    baseRows.sort(
+      (a, b) =>
+        new Date(a.created_at || 0) - new Date(b.created_at || 0) ||
+        a._idx - b._idx
+    );
+
+    const running = new Map();
+    const withRunning = baseRows.map((row) => {
+      const key = String(row.card_type_id ?? row.card_name ?? "unknown");
+      const prev = Number(running.get(key) ?? 0) || 0;
+
+      const q = Number(row.qty) || 0;
+      const after = row.movement_type === "IN" ? prev + q : prev - q;
+
+      running.set(key, after);
+
+      return {
+        ...row,
+        before_qty: row.before_qty ?? prev,
+        after_qty: row.after_qty ?? after,
+      };
+    });
+
+    // للعرض نرجّع الأحدث أولاً
+    withRunning.sort(
+      (a, b) =>
+        new Date(b.created_at || 0) - new Date(a.created_at || 0) ||
+        b._idx - a._idx
+    );
+
+    return withRunning;
   }, [moves]);
 
   const filteredMoves = useMemo(() => {

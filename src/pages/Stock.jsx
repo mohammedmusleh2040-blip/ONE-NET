@@ -122,7 +122,7 @@ export default function Stock() {
     setLoading(true);
     try {
       const { data: b, error: eb } = await supabase
-        .from("v_card_balances")
+        .from("v_card_stock_summary")
         .select("*")
         .order("card_type_id", { ascending: true });
       if (eb) throw eb;
@@ -152,9 +152,9 @@ export default function Stock() {
 
       let movementsRows = [];
       const { data: m, error: em } = await supabase
-        .from("v_card_movements")
+        .from("v_card_movement_ledger")
         .select("*")
-        .order("id", { ascending: false })
+        .order("created_at", { ascending: false }).order("id", { ascending: false })
         .limit(500);
 
       if (em) {
@@ -171,7 +171,7 @@ export default function Stock() {
         const { data: raw, error: rawErr } = await supabase
           .from("card_movements")
           .select("id, created_at, card_type_id, movement_type, qty, note, op_type, ref_type, ref_id")
-          .order("id", { ascending: false })
+          .order("created_at", { ascending: false }).order("id", { ascending: false })
           .limit(500);
 
         if (rawErr) throw rawErr;
@@ -298,14 +298,14 @@ export default function Stock() {
     if (!cardTypeId) return alert("اختر نوع الكرت");
     if (!qty || Number(qty) <= 0) return alert("الكمية يجب أن تكون أكبر من صفر");
 
-    const createdAt = useCustomDate ? new Date(movementDate).toISOString() : null;
+    const movementDateOnly = useCustomDate ? String(movementDate || "").slice(0,10) : null;
 
     const { error } = await supabase.rpc("apply_card_movement", {
       p_card_type_id: Number(cardTypeId),
       p_movement_type: mode,
       p_qty: Number(qty),
       p_note: note || null,
-      p_created_at: createdAt,
+      ...(movementDateOnly ? { p_movement_date: movementDateOnly } : {}),
     });
 
     if (error) {

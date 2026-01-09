@@ -497,16 +497,14 @@ async function loadInvoices(customersList = customers) {
 
   // ====== RPC (حركة مخزون) ======
   // هذا يضمن: حركة + تحديث card_stock + قبل/بعد داخل card_movements (لو دالتك تسويها)
-  async function rpcCardMove({ card_type_id, movement_type, qty, noteText, created_at_iso }) {
-    // محاولة 1: توقيع فيه p_created_at
+  async function rpcCardMove({ card_type_id, movement_type, qty, noteText, movement_date }) {
+    // الأفضل: نعتمد تاريخ (date) فقط في الـ Ledger
     let res = await supabase.rpc("apply_card_movement", {
       p_card_type_id: Number(card_type_id),
       p_movement_type: String(movement_type).toUpperCase(),
       p_qty: Number(qty),
       p_note: noteText || null,
-      // مهم: إرسال null لـ p_created_at قد يجعل PostgREST غير قادر على تحديد نوع الباراميتر
-      // لذلك لا نرسل p_created_at إلا إذا كان لدينا قيمة ISO صحيحة.
-      ...(created_at_iso ? { p_created_at: String(created_at_iso) } : {}),
+      ...(movement_date ? { p_movement_date: String(movement_date) } : {}),
     });
 
     if (!res.error) return res.data;
@@ -517,6 +515,7 @@ async function loadInvoices(customersList = customers) {
       p_movement_type: String(movement_type).toUpperCase(),
       p_qty: Number(qty),
       p_note: noteText || null,
+      ...(movement_date ? { p_movement_date: String(movement_date) } : {}),
     });
 
     if (!res.error) return res.data;
@@ -536,8 +535,7 @@ async function loadInvoices(customersList = customers) {
         movement_type: "OUT",
         qty,
         noteText: `خصم فاتورة رقم ${invNumberOrId}`,
-        // ISO مع Z عشان يطابق timestamptz بسهولة
-        created_at_iso: invDateStr ? `${invDateStr}T12:00:00.000Z` : null,
+        movement_date: invDateStr || null,
       });
     }
   }
@@ -552,7 +550,7 @@ async function loadInvoices(customersList = customers) {
         movement_type: "IN",
         qty,
         noteText: `${reasonTag} فاتورة ${invNumberOrId}`,
-        created_at_iso: invDateStr ? `${invDateStr}T12:00:00.000Z` : null,
+        movement_date: invDateStr || null,
       });
     }
   }

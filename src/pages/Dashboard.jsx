@@ -282,13 +282,13 @@ async function loadInvoicesRange(fromISO, toISO) {
   }
 
   async function loadMovementsRange(fromISO, toISO) {
-    const toPlus1 = addDaysISO(toISO, 1);
     try {
       const { data, error } = await supabase
         .from("v_card_movements")
         .select("*")
-        .gte("created_at", tsFromISO(fromISO))
-        .lt("created_at", tsFromISO(toPlus1))
+        .gte("movement_date", fromISO)
+        .lte("movement_date", toISO)
+        .order("movement_date", { ascending: false })
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -303,8 +303,9 @@ async function loadInvoicesRange(fromISO, toISO) {
     const { data, error } = await supabase
       .from("card_movements")
       .select('id,card_type_id,movement_type,qty,"before","after",before_qty,after_qty,note,created_at,card_types(name)')
-      .gte("created_at", tsFromISO(fromISO))
-      .lt("created_at", tsFromISO(toPlus1))
+      .gte("movement_date", fromISO)
+      .lte("movement_date", toISO)
+      .order("movement_date", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (error) throw error;

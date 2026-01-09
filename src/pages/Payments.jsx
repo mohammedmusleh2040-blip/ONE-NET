@@ -273,7 +273,8 @@ async function savePayment(e) {
 
     const payload = {
       customer_id: cid,
-      invoice_id: iid,
+      invoice_id: resolvedInvoiceId,
+      payment_type,
       amount: amt,
       method: String(fMethod || ""),
       note: String(fNote || ""),
