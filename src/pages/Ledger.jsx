@@ -46,9 +46,21 @@ function buildRunning(rows, opening = 0) {
 }
 
 function getCardBalanceFromRow(row) {
-  // نحاول نلقط أي عمود رصيد موجود عندك داخل card_types
+  // نحاول نلقط أي عمود رصيد موجود (غالباً يجي من card_stock)
   return safeNum(
-    pick(row, ["current_qty", "qty", "stock_qty", "balance", "current_stock", "available_qty", "remaining_qty"], 0)
+    pick(
+      row,
+      [
+        "quantity", // card_stock.quantity
+        "current_qty",
+        "stock_qty",
+        "balance",
+        "current_stock",
+        "available_qty",
+        "remaining_qty",
+      ],
+      0
+    )
   );
 }
 
@@ -109,10 +121,20 @@ export default function Ledger() {
 
   // ===================== Loaders =====================
   async function loadCardTypes() {
-    // نستخدم * حتى لا يصير خطأ لو الأعمدة تختلف عندك
-    const { data, error } = await supabase.from("card_types").select("*").order("name", { ascending: true });
-    if (error) throw error;
-    setCardTypes(Array.isArray(data) ? data : []);
+    // نجيب الأنواع + رصيد كل نوع من card_stock (عشان يظهر الرصيد الحالي صح)
+    const [{ data: types, error: typeErr }, { data: stocks, error: stockErr }] = await Promise.all([
+      supabase.from("card_types").select("*").order("name", { ascending: true }),
+      supabase.from("card_stock").select("card_type_id,quantity"),
+    ]);
+
+    if (typeErr) throw typeErr;
+    if (stockErr) throw stockErr;
+
+    const stockMap = new Map();
+    (stocks || []).forEach((r) => stockMap.set(r.card_type_id, safeNum(r.quantity)));
+
+    const merged = (types || []).map((t) => ({ ...t, quantity: stockMap.get(t.id) ?? 0 }));
+    setCardTypes(Array.isArray(merged) ? merged : []);
   }
 
   async function loadCustomers() {
@@ -128,64 +150,28 @@ export default function Ledger() {
   async function loadMovements() {
     setLoading(true);
     try {
-      // 1) try view first
-      let viewOk = true;
-      let data = null;
+      // نستخدم created_at للتصفية بالتاريخ لأن بعض الـ views ما فيها movement_date
+      const fromTs = `${from}T00:00:00`;
+      const toTs = `${to}T23:59:59.999`;
 
-      try {
-        let vq = supabase
-          .from("v_card_movements")
-          .select("*")
-          .gte("movement_date", from)
-          .lte("movement_date", to)
-          .order("movement_date", { ascending: false })
-          .order("created_at", { ascending: false });
+      // لاحظ: اعتمدنا هنا على الجدول الأساسي card_movements فقط لتفادي اختلاف أعمدة الـ views
+      setUsingView(false);
 
-        // إجبارية للبائع (fallback)
+      let tq = supabase
+        .from("card_movements")
+        .select(
+          'id,card_type_id,movement_type,qty,before_qty,after_qty,note,created_at,card_types(name)'
+        )
+        .gte("created_at", fromTs)
+        .lte("created_at", toTs)
+        .order("created_at", { ascending: false });
 
-        // إجبارية للبائع
-        if (isSeller && authUser?.id) vq = vq.eq("seller_user_id", authUser.id);
+      if (cardTypeId !== "all") tq = tq.eq("card_type_id", cardTypeId);
+      if (mType !== "all") tq = tq.eq("movement_type", mType);
 
-        if (cardTypeId !== "all") vq = vq.eq("card_type_id", cardTypeId);
-        if (mType !== "all") vq = vq.eq("movement_type", mType);
-
-        const res = await vq;
-        if (res.error) throw res.error;
-        data = Array.isArray(res.data) ? res.data : [];
-        setUsingView(true);
-      } catch (e) {
-        console.warn("v_card_movements not available, fallback to card_movements", e);
-        viewOk = false;
-        setUsingView(false);
-      }
-
-      // 2) fallback to table
-      if (!viewOk) {
-        // بناء الاستعلام من الجدول الأساسي
-        let tq = supabase
-          .from("card_movements")
-          .select('id,card_type_id,movement_type,qty,"before","after",note,created_at,invoice_id,card_types(name)')
-          .gte("movement_date", from)
-          .lte("movement_date", to)
-          .order("movement_date", { ascending: false })
-          .order("created_at", { ascending: false });
-
-        // فلتر نوع الكرت
-        if (cardTypeId) tq = tq.eq("card_type_id", cardTypeId);
-
-        // فلتر IN/OUT
-        if (movementType && movementType !== "ALL") tq = tq.eq("movement_type", movementType);
-
-        // إجبارية للبائع
-        if (isSeller && authUser?.id) tq = tq.eq("seller_user_id", authUser.id);
-
-        const res = await tq;
-        if (res.error) throw res.error;
-        data = Array.isArray(res.data) ? res.data : [];
-      }
-
-      // حماية إضافية: أحيانًا ممكن data ما تكون Array
-      setMoves(Array.isArray(data) ? data : []);
+      const res = await tq;
+      if (res.error) throw res.error;
+      setMoves(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
       console.error(e);
       alert(e?.message || "فشل تحميل حركة الكروت");
@@ -203,6 +189,9 @@ export default function Ledger() {
         r.movement_type || r.type || r.movement || r.direction || "";
 
       const qty = Number(r.qty ?? r.quantity ?? r.amount ?? 0) || 0;
+      const noteText = String(r.note ?? r.notes ?? "");
+      const invMatch = noteText.match(/INV-\d+/);
+      const inferredInvoice = invMatch ? invMatch[0] : "";
 
       return {
         ...r,
@@ -212,11 +201,13 @@ export default function Ledger() {
         qty,
         card_type_id:
           r.card_type_id ?? r.cardTypeId ?? r.card_type ?? r.card_id ?? null,
-        card_name: r.card_name ?? r.card ?? r.name ?? r.cardTypeName ?? "",
+        card_name: r.card_name ?? r.card_types?.name ?? r.card ?? r.name ?? r.cardTypeName ?? "",
         customer_name: r.customer_name ?? r.customer ?? "",
-        invoice_no: r.invoice_no ?? r.invoice_number ?? r.invoice ?? "",
-        source: r.source ?? r.src ?? "",
-        note: r.note ?? r.notes ?? "",
+        invoice_no:
+          r.invoice_no ?? r.invoice_number ?? r.invoice ?? inferredInvoice,
+        source:
+          r.source ?? r.src ?? (inferredInvoice ? "invoice" : ""),
+        note: noteText,
         // قد تأتي من View جاهز، وإذا غير موجودة سنحسبها
         before_qty: r.before_qty ?? r.before ?? null,
         after_qty: r.after_qty ?? r.after ?? null,
@@ -233,17 +224,20 @@ export default function Ledger() {
     const running = new Map();
     const withRunning = baseRows.map((row) => {
       const key = String(row.card_type_id ?? row.card_name ?? "unknown");
-      const prev = Number(running.get(key) ?? 0) || 0;
+      const prevComputed = Number(running.get(key) ?? 0) || 0;
 
+      // لو الـ before_qty موجود، نعتبره هو بداية الرصيد الحقيقي
+      const before = Number(row.before_qty ?? prevComputed) || 0;
       const q = Number(row.qty) || 0;
-      const after = row.movement_type === "IN" ? prev + q : prev - q;
+      const afterComputed = row.movement_type === "IN" ? before + q : before - q;
 
-      running.set(key, after);
+      const afterFinal = Number(row.after_qty ?? afterComputed) || 0;
+      running.set(key, afterFinal);
 
       return {
         ...row,
-        before_qty: row.before_qty ?? prev,
-        after_qty: row.after_qty ?? after,
+        before_qty: before,
+        after_qty: afterFinal,
       };
     });
 

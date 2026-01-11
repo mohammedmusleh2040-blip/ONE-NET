@@ -1071,11 +1071,17 @@ try {
       await loadInvoices();
       showToast("تم حذف الفاتورة", "ok");
     } catch (e) {
-      console.error(e);
-      showToast("فشل حذف الفاتورة", "err");
-    } finally {
-      setLoading(false);
-    }
+  console.error("deleteInvoice failed:", e);
+
+  // يطلع لك السبب واضح بدل "فشل حذف الفاتورة" فقط
+  const msg =
+    e?.message ||
+    e?.error_description ||
+    (typeof e === "string" ? e : JSON.stringify(e));
+
+  showToast(`فشل حذف الفاتورة: ${msg}`, "err");
+}
+
   }
 
   // ===== Save invoice (إنشاء أو تعديل) =====
