@@ -24,7 +24,7 @@ async function syncInvoicePayments(invoiceId) {
   // احسب مجموع السداد على هذه الفاتورة
   const { data: inv, error: invErr } = await supabase
     .from("invoices")
-    .select("id,total_after_discount")
+    .select("id,paid_amount,remaining_amount")
     .eq("id", iid)
     .maybeSingle();
   if (invErr || !inv) return;
@@ -36,9 +36,9 @@ async function syncInvoicePayments(invoiceId) {
   if (payErr) return;
 
   const paid = Math.max(0, (pays || []).reduce((s, p) => s + safeNum(p.amount), 0));
-  const total = safeNum(inv.total_after_discount);
+  const total = safeNum(inv.paid_amount) + safeNum(inv.remaining_amount);
   const remaining = Math.max(0, total - paid);
-  const status = remaining <= 0 ? "paid" : "unpaid";
+  const status = remaining <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
 
   await supabase
     .from("invoices")
@@ -89,16 +89,72 @@ export default function Payments() {
     setCustomers(data || []);
   }
 
+  // نحاول View أولاً (v_invoices) ثم fallback للجدول invoices
   async function loadInvoices() {
-    // نجيب رقم الفاتورة + id عشان نربط السند بفاتورة صحيحة
-    const { data, error } = await supabase
+    try {
+      // 1) view
+      let q = supabase
+        .from("v_invoices")
+        .select("id,number,customer_id,invoice_date,remaining_amount,total_after_discount,paid_amount")
+        .order("invoice_date", { ascending: true })
+        .limit(2000);
+
+      const { data: vData, error: vErr } = await q;
+      if (!vErr && Array.isArray(vData)) {
+        setInvoices(
+          vData.map((r) => ({
+            ...r,
+            total_after_discount: r.total_after_discount ?? 0,
+            paid_amount: r.paid_amount ?? 0,
+            remaining_amount: r.remaining_amount ?? 0,
+          }))
+        );
+        return;
+      }
+    } catch (e) {
+      // ignore, fallback below
+      console.warn("v_invoices load failed, fallback to invoices:", e);
+    }
+
+    // 2) fallback table (نختار أعمدة آمنة فقط لتجنب 400)
+    // بعض النسخ قد لا تحتوي total_after_discount في الجدول، لذلك نحاول 2 توقيعات
+    const try1 = await supabase
       .from("invoices")
-      .select("id,number,customer_id")
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (error) throw error;
-    setInvoices(data || []);
+      .select("id,number,customer_id,invoice_date,remaining_amount,total_after_discount,paid_amount")
+      .order("invoice_date", { ascending: true })
+      .limit(2000);
+
+    if (!try1.error) {
+      setInvoices(
+        (try1.data || []).map((r) => ({
+          ...r,
+          total_after_discount: r.total_after_discount ?? 0,
+          paid_amount: r.paid_amount ?? 0,
+          remaining_amount: r.remaining_amount ?? 0,
+        }))
+      );
+      return;
+    }
+
+    // محاولة 2: بدون total_after_discount (لو غير موجود)
+    const try2 = await supabase
+      .from("invoices")
+      .select("id,number,customer_id,invoice_date,remaining_amount,total_before_discount,paid_amount")
+      .order("invoice_date", { ascending: true })
+      .limit(2000);
+
+    if (try2.error) throw try2.error;
+
+    setInvoices(
+      (try2.data || []).map((r) => ({
+        ...r,
+        total_after_discount: r.total_after_discount ?? r.total_before_discount ?? 0,
+        paid_amount: r.paid_amount ?? 0,
+        remaining_amount: r.remaining_amount ?? 0,
+      }))
+    );
   }
+
 
   async function loadPayments() {
     setLoading(true);
@@ -109,20 +165,24 @@ export default function Payments() {
       const toPlus1 = dTo.toISOString().slice(0, 10);
 
       // ✅ لا يوجد عمود number في جدول payments عندك
-      const { data, error } = await supabase
+      let q = supabase
         .from("payments")
         .select("id,customer_id,invoice_id,amount,method,note,created_at")
         .gte("created_at", from)
-        .lt("created_at", toPlus1)
-        .order("created_at", { ascending: false });
+        .lt("created_at", toPlus1);
+
+      if (method && method !== "all") q = q.eq("method", method);
+      if (customerId && customerId !== "all") q = q.eq("customer_id", Number(customerId));
+
+      const { data, error } = await q.order("created_at", { ascending: false });
 
       if (error) throw error;
       setRows(data || []);
     } finally {
       setLoading(false);
     }
-
   }
+
 
   useEffect(() => {
     (async () => {
@@ -245,7 +305,7 @@ async function savePayment(e) {
     if (iid) {
       const { data: inv, error: invErr } = await supabase
         .from("invoices")
-        .select("id,total_after_discount")
+        .select("id,paid_amount,remaining_amount")
         .eq("id", iid)
         .maybeSingle();
       if (invErr || !inv) throw new Error("لم يتم العثور على الفاتورة المختارة");
@@ -260,7 +320,7 @@ async function savePayment(e) {
         .filter((p) => Number(p.id) !== Number(editId || 0))
         .reduce((s, p) => s + safeNum(p.amount), 0);
 
-      const total = safeNum(inv.total_after_discount);
+      const total = safeNum(inv.paid_amount) + safeNum(inv.remaining_amount);
       const newPaid = paidOther + amt;
 
       // نمنع فقط تجاوز الإجمالي (نسمح بالمرتجع/الصرف لو كان سالب)
@@ -273,9 +333,8 @@ async function savePayment(e) {
 
     const payload = {
       customer_id: cid,
-      invoice_id: resolvedInvoiceId,
-      payment_type,
-      amount: amt,
+      invoice_id: iid || null,
+amount: amt,
       method: String(fMethod || ""),
       note: String(fNote || ""),
       created_at: fCreatedAt || new Date().toISOString(),
@@ -345,12 +404,20 @@ async function deletePayment(id) {
 
   const invOptions = useMemo(() => {
     const s = invSearch.trim().toLowerCase();
-    if (!s) return [];
+
+    // لو تم اختيار عميل: اعرض فواتير العميل (حتى لو بدون بحث)
+    let base = invoices;
+    if (fCustomerId) {
+      base = base.filter((i) => String(i.customer_id) === String(fCustomerId));
+    }
+
     // يقبل كتابة رقم الفاتورة أو جزء منه
-    return invoices
-      .filter((i) => String(i.number || "").toLowerCase().includes(s))
-      .slice(0, 8);
-  }, [invSearch, invoices]);
+    if (s) {
+      base = base.filter((i) => String(i.number || "").toLowerCase().includes(s));
+    }
+
+    return (base || []).slice(0, 8);
+  }, [invSearch, invoices, fCustomerId]);
 
   // ====== UI ======
   return (

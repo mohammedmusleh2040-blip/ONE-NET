@@ -35,10 +35,7 @@ export default function Stock() {
   const filteredBalances = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return balances;
-    return balances.filter((r) => {
-      const nm = (r.name || r.card_type_name || r.card_name || "").toLowerCase();
-      return nm.includes(s);
-    });
+    return balances.filter((r) => (r.name || "").toLowerCase().includes(s));
   }, [balances, q]);
 
   // ====== Add Type
@@ -132,21 +129,16 @@ export default function Stock() {
       // Enrich balances with per-card thresholds (from card_types)
       const { data: trows, error: et } = await supabase
         .from("card_types")
-        // Include name + price because some stock views don't expose them
-        .select("id, name, price, low_stock_threshold, alert_qty, low_stock_alert");
+        .select("id, low_stock_threshold, alert_qty, low_stock_alert");
       if (et) throw et;
 
       const tmap = new Map((trows || []).map((r) => [Number(r.id), r]));
       const enriched = (b || []).map((row) => {
         const t = tmap.get(Number(row.card_type_id));
-        const name = row.name || row.card_type_name || (t && t.name) || null;
-        const price = row.price ?? (t && t.price) ?? 0;
-        const quantity = row.quantity ?? row.stock_qty ?? row.current_qty ?? row.balance ?? 0;
         return {
           ...row,
-          name,
-          price,
-          quantity,
+          name: row.name ?? row.card_name ?? row.card ?? row.card_type ?? row.cardType ?? row.cardtype ?? '',
+          balance: (row.balance ?? row.current_qty ?? row.stock_qty ?? row.qty ?? 0),
           low_stock_threshold:
             (t && (t.low_stock_threshold ?? t.alert_qty)) ?? row.low_stock_threshold,
           alert_qty: (t && t.alert_qty) ?? row.alert_qty,
@@ -158,13 +150,13 @@ export default function Stock() {
 
 
       // Movements: some DB views might not include the card type name, so we fallback safely.
-      const typeNameById = new Map((enriched || []).map((t) => [String(t.card_type_id), t.name || t.card_type_name]));
+      const typeNameById = new Map((enriched || []).map((t) => [String(t.card_type_id), t.name]));
 
       let movementsRows = [];
       const { data: m, error: em } = await supabase
-        .from("v_card_movement_ledger")
+        .from("v_card_movements")
         .select("*")
-        .order("created_at", { ascending: false }).order("id", { ascending: false })
+        .order("id", { ascending: false })
         .limit(500);
 
       if (em) {
@@ -181,7 +173,7 @@ export default function Stock() {
         const { data: raw, error: rawErr } = await supabase
           .from("card_movements")
           .select("id, created_at, card_type_id, movement_type, qty, note, op_type, ref_type, ref_id")
-          .order("created_at", { ascending: false }).order("id", { ascending: false })
+          .order("id", { ascending: false })
           .limit(500);
 
         if (rawErr) throw rawErr;
@@ -308,14 +300,14 @@ export default function Stock() {
     if (!cardTypeId) return alert("اختر نوع الكرت");
     if (!qty || Number(qty) <= 0) return alert("الكمية يجب أن تكون أكبر من صفر");
 
-    const movementDateOnly = useCustomDate ? String(movementDate || "").slice(0,10) : null;
+    const createdAt = useCustomDate ? new Date(movementDate).toISOString() : null;
 
     const { error } = await supabase.rpc("apply_card_movement", {
       p_card_type_id: Number(cardTypeId),
       p_movement_type: mode,
       p_qty: Number(qty),
       p_note: note || null,
-      ...(movementDateOnly ? { p_movement_date: movementDateOnly } : {}),
+      p_created_at: createdAt,
     });
 
     if (error) {
@@ -741,7 +733,7 @@ export default function Stock() {
                     {filteredMovements.map((m, idx) => (
                       <tr key={m.id} style={{ background: rowBg(m.note) }}>
       <td>{idx + 1}</td>
-      <td>{m.card_type_name || m.card_name || m.card_name_ar || m.name || m.card || "-"}</td>
+      <td>{m.card_name || m.card || "-"}</td>
       <td style={{ fontWeight: 800 }}>{(m.movement_type || "").toUpperCase()}</td>
       <td style={{ fontWeight: 800 }}>
         {m.movement_type === "IN" ? "+" : "-"} {safeNum(m.qty)}
@@ -752,8 +744,9 @@ export default function Stock() {
       <td>{fmtDate(m.created_at || m.date || m.movement_date || "")}</td>
       <td>{m.op_type || m.operation_type || m.type || "عادية"}</td>
       <td style={{ textAlign: "center" }}>
-        <button className="btn btn-sm" onClick={() => openEditMovement(m)}>تعديل</button>
-        <button className="btn btn-sm danger" onClick={() => deleteMovement(m)}>حذف</button>
+        {/* Use the existing handlers implemented above */}
+        <button className="btn btn-sm" onClick={() => openEdit(m)}>تعديل</button>
+        <button className="btn btn-sm danger" onClick={() => reverseMovement(m)}>حذف</button>
       </td>
 </tr>
                     ))}

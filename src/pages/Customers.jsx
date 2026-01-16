@@ -81,7 +81,12 @@ function pickInvoiceTotal(inv) {
 }
 
 export default function Customers() {
-  const [tab, setTab] = useState("customers"); // customers | debts
+  const [tab, setTab] = useState("customers");
+
+  // ===== Unified Pay Modal (from Debts tab) =====
+  const [payOpen, setPayOpen] = useState(false);
+  const [payCustomer, setPayCustomer] = useState(null); // {id,name}
+ // customers | debts
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -593,12 +598,12 @@ export default function Customers() {
                       </button>
                       <button
                         className="btn-primary"
-                        onClick={() => payOpeningBalance({ id: d.id, opening_balance: d.opening_balance }, async () => {
-                          await load();
-                          await loadDebts();
-                        })}
+                        onClick={() => {
+                          setPayCustomer({ id: d.id, name: d.name });
+                          setPayOpen(true);
+                        }}
                       >
-                        سداد افتتاحي
+                        سداد
                       </button>
                     </td>
                   </tr>
@@ -620,6 +625,344 @@ export default function Customers() {
           </div>
         </div>
       )}
+      {/* ===== Unified Pay Modal ===== */}
+      {payOpen && (
+        <UnifiedPayModal
+          open={payOpen}
+          customer={payCustomer}
+          onClose={() => {
+            setPayOpen(false);
+            setPayCustomer(null);
+          }}
+          onDone={async () => {
+            await load();
+            await loadDebts();
+          }}
+        />
+      )}
+    </div>
+
+  );
+}
+
+
+// =========================
+// Unified Pay Modal Component
+// =========================
+function UnifiedPayModal({ open, customer, onClose, onDone }) {
+  const safeNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const money = (v) => safeNum(v).toFixed(2);
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+
+  const [mode, setMode] = useState("invoice"); // invoice | general
+  const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState("cash"); // cash | transfer | other
+  const [note, setNote] = useState("");
+  const [payDate, setPayDate] = useState(todayISO());
+  const [invoiceId, setInvoiceId] = useState("");
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const cid = Number(customer?.id || 0) || null;
+
+  async function fetchCustomerInvoices(customerId) {
+    // نجيب فواتير العميل غير المسددة (الأقدم أولاً)
+    // نحاول view v_invoices أولاً ثم fallback للجدول invoices
+    try {
+      const { data: vData, error: vErr } = await supabase
+        .from("v_invoices")
+        .select("id,number,customer_id,invoice_date,remaining_amount,total_after_discount,paid_amount")
+        .eq("customer_id", customerId)
+        .gt("remaining_amount", 0)
+        .order("invoice_date", { ascending: true })
+        .limit(2000);
+
+      if (!vErr && Array.isArray(vData)) {
+        return vData.map((r) => ({
+          ...r,
+          total_after_discount: r.total_after_discount ?? 0,
+          paid_amount: r.paid_amount ?? 0,
+          remaining_amount: r.remaining_amount ?? 0,
+        }));
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const t1 = await supabase
+      .from("invoices")
+      .select("id,number,customer_id,invoice_date,remaining_amount,total_after_discount,paid_amount")
+      .eq("customer_id", customerId)
+      .gt("remaining_amount", 0)
+      .order("invoice_date", { ascending: true })
+      .limit(2000);
+
+    if (!t1.error) {
+      return (t1.data || []).map((r) => ({
+        ...r,
+        total_after_discount: r.total_after_discount ?? 0,
+        paid_amount: r.paid_amount ?? 0,
+        remaining_amount: r.remaining_amount ?? 0,
+      }));
+    }
+
+    const t2 = await supabase
+      .from("invoices")
+      .select("id,number,customer_id,invoice_date,remaining_amount,total_before_discount,paid_amount")
+      .eq("customer_id", customerId)
+      .gt("remaining_amount", 0)
+      .order("invoice_date", { ascending: true })
+      .limit(2000);
+
+    if (t2.error) throw t2.error;
+
+    return (t2.data || []).map((r) => ({
+      ...r,
+      total_after_discount: r.total_after_discount ?? r.total_before_discount ?? 0,
+      paid_amount: r.paid_amount ?? 0,
+      remaining_amount: r.remaining_amount ?? 0,
+    }));
+  }
+
+  async function syncInvoice(invoice_id) {
+    // يجمع سندات الفاتورة ويحدث paid_amount/remaining_amount/status
+    const { data: inv, error: invErr } = await supabase
+      .from("invoices")
+      .select("id,paid_amount,remaining_amount")
+      .eq("id", invoice_id)
+      .maybeSingle();
+    if (invErr || !inv) return;
+
+    const { data: pays, error: pErr } = await supabase
+      .from("payments")
+      .select("amount")
+      .eq("invoice_id", invoice_id);
+    if (pErr) return;
+
+    const paid = (pays || []).reduce((s, r) => s + safeNum(r.amount), 0);
+    const total = safeNum(inv.paid_amount) + safeNum(inv.remaining_amount);
+    // _discount);
+    const remaining = Math.max(0, total - paid);
+
+    await supabase
+      .from("invoices")
+      .update({
+        paid_amount: paid,
+        remaining_amount: remaining,
+        status: remaining <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid",
+      })
+      .eq("id", invoice_id);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    if (!cid) return;
+    setMode("invoice");
+    setAmount("");
+    setMethod("cash");
+    setNote("");
+    setPayDate(todayISO());
+    setInvoiceId("");
+    (async () => {
+      try {
+        setLoading(true);
+        const invs = await fetchCustomerInvoices(cid);
+        setInvoices(invs);
+        if (invs.length) setInvoiceId(String(invs[0].id));
+      } catch (e) {
+        console.error(e);
+        alert(e?.message || "تعذر تحميل فواتير العميل");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line
+  }, [open, cid]);
+
+  async function onSave() {
+    if (!cid) return alert("العميل غير محدد");
+    const amt = safeNum(amount);
+    if (amt <= 0) return alert("أدخل مبلغ سداد صحيح");
+
+    try {
+      setLoading(true);
+
+      const baseNote = `${note || ""}${note ? " " : ""}[Customer:${customer?.name || cid}]`;
+
+      if (mode === "invoice") {
+        const iid = Number(invoiceId || 0) || null;
+        if (!iid) return alert("اختر فاتورة");
+
+        // إدخال سند مرتبط بفاتورة
+        const { error: insErr } = await supabase.from("payments").insert([
+          {
+            customer_id: cid,
+            invoice_id: iid,
+            amount: amt,
+            payment_type: "invoice",
+            method,
+            reference: null,
+            note: baseNote,
+            created_at: `${payDate}T12:00:00`,
+          },
+        ]);
+        if (insErr) throw insErr;
+
+        await syncInvoice(iid);
+      } else {
+        // general: يوزع على أقدم الفواتير غير المسددة
+        let left = amt;
+        const invs = await fetchCustomerInvoices(cid);
+
+        for (const inv of invs) {
+          if (left <= 0) break;
+          const rem = Math.max(0, safeNum(inv.remaining_amount));
+          if (rem <= 0) continue;
+
+          const pay = Math.min(rem, left);
+          left -= pay;
+
+          const { error: insErr } = await supabase.from("payments").insert([
+            {
+              customer_id: cid,
+              invoice_id: inv.id,
+              amount: pay,
+              payment_type: "invoice",
+              method,
+              reference: null,
+              note: `${baseNote} [ALLOC:${inv.number || inv.id}]`,
+              created_at: `${payDate}T12:00:00`,
+            },
+          ]);
+          if (insErr) throw insErr;
+
+          await syncInvoice(inv.id);
+        }
+
+        // إذا بقي مبلغ ومافي فواتير: نسجله كسند عام (invoice_id = null)
+        if (left > 0.0001) {
+          const { error: unErr } = await supabase.from("payments").insert([
+            {
+              customer_id: cid,
+              invoice_id: null,
+              amount: left,
+              payment_type: "other",
+              method,
+              reference: null,
+              note: `${baseNote} [UNLINKED_REMAIN:${money(left)}]`,
+              created_at: `${payDate}T12:00:00`,
+            },
+          ]);
+          if (unErr) throw unErr;
+        }
+      }
+
+      if (typeof onDone === "function") await onDone();
+      if (typeof onClose === "function") onClose();
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "فشل حفظ السداد");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 14,
+        zIndex: 9999,
+      }}
+    >
+      <div className="card" style={{ width: "min(760px, 96vw)", background: "#fff", opacity: 1 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontWeight: 800 }}>نافذة السداد الموحدة</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              العميل: <b>{customer?.name || customer?.id}</b>
+            </div>
+          </div>
+          <button className="btn" onClick={onClose}>
+            إغلاق
+          </button>
+        </div>
+
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <button className={mode === "invoice" ? "btn-primary" : "btn"} onClick={() => setMode("invoice")}>
+            خيار 1: فاتورة
+          </button>
+          <button className={mode === "general" ? "btn-primary" : "btn"} onClick={() => setMode("general")}>
+            خيار 2: سداد عام
+          </button>
+        </div>
+
+        {mode === "invoice" && (
+          <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+            <div className="col" style={{ minWidth: 260 }}>
+              <label style={{ fontSize: 12, color: "var(--muted)" }}>رقم الفاتورة</label>
+              <select className="input" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} disabled={loading}>
+                <option value="">اختر فاتورة...</option>
+                {invoices.map((inv) => (
+                  <option key={inv.id} value={inv.id}>
+                    {inv.number || inv.id} — المتبقي: {money(inv.remaining_amount)} — {inv.invoice_date || ""}
+                  </option>
+                ))}
+              </select>
+              {invoices.length === 0 && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>لا توجد فواتير متبقية لهذا العميل</div>}
+            </div>
+          </div>
+        )}
+
+        <div className="row" style={{ gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <div className="col">
+            <label style={{ fontSize: 12, color: "var(--muted)" }}>طريقة الدفع</label>
+            <select className="input" value={method} onChange={(e) => setMethod(e.target.value)} disabled={loading}>
+              <option value="cash">نقدي</option>
+              <option value="transfer">تحويل</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+
+          <div className="col">
+            <label style={{ fontSize: 12, color: "var(--muted)" }}>التاريخ</label>
+            <input className="input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} disabled={loading} />
+          </div>
+
+          <div className="col">
+            <label style={{ fontSize: 12, color: "var(--muted)" }}>مبلغ السداد</label>
+            <input className="input" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={loading} />
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 10 }}>
+          <div className="col">
+            <label style={{ fontSize: 12, color: "var(--muted)" }}>ملاحظة</label>
+            <input className="input" value={note} onChange={(e) => setNote(e.target.value)} disabled={loading} />
+          </div>
+        </div>
+
+        <div className="row" style={{ justifyContent: "end", marginTop: 12 }}>
+          <button className="btn-primary" onClick={onSave} disabled={loading}>
+            {loading ? "حفظ..." : "حفظ السداد"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)" }}>
+          - خيار (فاتورة): يسجل سند واحد مرتبط بالفاتورة ويحدث حالتها تلقائياً. <br />
+          - خيار (سداد عام): يوزع على أقدم الفواتير غير المسددة، وإذا بقي مبلغ بلا فواتير يسجل كسند عام (غير مربوط).
+        </div>
+      </div>
     </div>
   );
 }

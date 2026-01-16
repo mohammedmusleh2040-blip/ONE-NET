@@ -87,10 +87,15 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
   };
 
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Sellers list (role = seller)
   const [sellers, setSellers] = useState([]);
   const [sellerId, setSellerId] = useState("");
+  // If app_users doesn't expose the seller UUID, we can't call vendor_stock_move (seller_user_id is uuid).
+  // We'll auto-detect a UUID column in app_users if it exists.
+  const [sellerUidColumn, setSellerUidColumn] = useState(null);
+  const [needsSellerUidMap, setNeedsSellerUidMap] = useState(false);
 
   // card types
   const [cardTypes, setCardTypes] = useState([]);
@@ -196,11 +201,35 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
   const refreshLists = async () => {
     setLoading(true);
     try {
-      // sellers (role = seller)
-      const s1 = await supabase.from("app_users").select("id, username, role").order("username", { ascending: true });
+      // sellers
+      // NOTE: vendor_stock.seller_user_id is UUID in DB, but app_users.id is often BIGINT.
+      // Some schemas store the auth UUID in a different column (user_id/auth_id/uid/uuid/etc.).
+      // We'll fetch all columns and auto-detect a UUID column.
+      const s1 = await supabase.from("app_users").select("*").order("username", { ascending: true });
       if (s1.error) throw s1.error;
-      const sellerRows = (s1.data || []).filter((r) => String(r.role || "").toLowerCase() === "seller");
-      setSellers(sellerRows);
+
+      const rows = s1.data || [];
+
+      // NOTE: في نظامك جدول app_users هو نفسه "البائع" (id من نوع UUID).
+      // لذلك نستخدم app_users.id مباشرة كـ seller_user_id في حركات العهد.
+      // ما نحتاج أي عمود UUID إضافي داخل app_users.
+      const isUuid = (v) =>
+        typeof v === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+      setSellerUidColumn("id");
+
+      // Prefer users that are sellers, but if role isn't set consistently, don't block the UI.
+      const sellerCandidates = rows.filter((r) => String(r.role || "").toLowerCase() === "seller");
+      const list = (sellerCandidates.length ? sellerCandidates : rows).map((r) => ({
+        id: r.id,
+        username: r.username ?? r.name ?? `#${r.id}`,
+        role: r.role,
+        // seller_user_id (UUID)
+        seller_uuid: r.id,
+      }));
+
+      setNeedsSellerUidMap(false);
+      setSellers(list);
 
       // card types
       const ct = await supabase.from("card_types").select("id, name").order("id", { ascending: true });
@@ -208,7 +237,9 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
       setCardTypes(ct.data || []);
 
       // balances if table exists
-      await refreshBalances(sellerId || (sellerRows[0]?.id || ""));
+      // balances (requires UUID)
+      const firstUuid = list.find((x) => isUuid(x.seller_uuid))?.seller_uuid;
+      await refreshBalances(sellerId || firstUuid || "");
     } catch (e) {
       console.error(e);
       toast(e?.message || String(e), "err");
@@ -218,25 +249,57 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
   };
 
   const refreshBalances = async (sid) => {
-    // Load balances from vendor_stock (no view required)
+    // Preferred: v_vendor_stock_balances (computed view). Fallback: compute from vendor_stock_movements.
     try {
       if (!sid) {
         setBalances([]);
         return;
       }
 
-      let r = await supabase
-        .from("v_vendor_stock")
-.select("card_type_id,card_name,price,qty")
-        .eq("seller_user_id", sid);
-      if (!r.error) {
-        // add card_name from cardTypes
-        const nameMap = new Map((cardTypes || []).map((c) => [Number(c.id), c.name]));
-        const rows = (r.data || []).map((x) => ({ ...x, card_name: nameMap.get(Number(x.card_type_id)) || `#${x.card_type_id}` }));
+      // 1) Try view (if you created it in SQL)
+      const tryView = await supabase
+        .from("v_vendor_stock_balances")
+        .select("card_type_id,card_name,price,balance")
+        .eq("seller_user_id", sid)
+        .order("price", { ascending: true });
+
+      if (!tryView.error && Array.isArray(tryView.data)) {
+        const rows = tryView.data.map((r) => ({
+          card_type_id: r.card_type_id,
+          card_name: r.card_name,
+          price: r.price,
+          qty: r.balance,
+        }));
         setBalances(rows);
         return;
       }
-      setBalances([]);
+
+      // 2) Fallback: compute client-side
+      const res = await supabase
+        .from("vendor_stock_movements")
+        .select("card_type_id,movement_type,qty,card_types(name,price)")
+        .eq("seller_user_id", sid);
+
+      if (res.error) {
+        setBalances([]);
+        return;
+      }
+
+      const agg = new Map();
+      for (const m of res.data || []) {
+        const id = Number(m.card_type_id);
+        const cur = agg.get(id) || { card_type_id: id, card_name: m.card_types?.name || `#${id}`, price: Number(m.card_types?.price || 0), qty: 0 };
+        const sign = String(m.movement_type || "").toUpperCase() === "OUT" ? -1 : 1;
+        cur.qty += sign * Number(m.qty || 0);
+        // keep latest non-zero meta
+        if (m.card_types?.name) cur.card_name = m.card_types.name;
+        if (m.card_types?.price != null) cur.price = Number(m.card_types.price);
+        agg.set(id, cur);
+      }
+
+      const rows = Array.from(agg.values())
+        .sort((a, b) => (a.price || 0) - (b.price || 0));
+      setBalances(rows);
     } catch {
       setBalances([]);
     }
@@ -252,7 +315,12 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sellerId, cardTypes]);
 
-  const submitAssign = async (movementType = "IN") => {
+  // IMPORTANT:
+  // - تسليم عهدة للبائع = ينقص من المخزون الرئيسي (OUT) + يزيد في عهدة البائع (IN)
+  // - استرجاع من البائع = يزيد المخزون الرئيسي (IN) + ينقص من عهدة البائع (OUT)
+  // الهدف: المخزون لا يصير IN بالغلط عند التسليم.
+  const submitAssign = async (action = "IN") => {
+    if (submitting) return;
     if (!sellerId) return toast("اختر البائع أولاً", "warn");
     if (!cardTypeId) return toast("اختر نوع الكرت", "warn");
     const q = safeNum(qty);
@@ -261,22 +329,39 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
     const ok = await confirmPassword("تسليم/استرجاع عهدة البائع");
     if (!ok) return;
 
+    const sellerMove = action === "IN" ? "IN" : "OUT";
+    const mainMove = action === "IN" ? "OUT" : "IN";
+    const nowIso = new Date().toISOString();
+
+    setSubmitting(true);
     setLoading(true);
     try {
-      const payload = {
-        p_actor_id: actorId,
-        p_seller_user_id: sellerId,
-        p_card_type_id: Number(cardTypeId),
-        p_movement_type: movementType,
-        p_qty: q,
-        p_note: (note || "").trim() || null,
-        p_created_at: new Date().toISOString(),
-      };
+      // 1) حركة عهدة البائع
+      const v1 = await supabase.from("vendor_stock_movements").insert([
+        {
+          seller_user_id: sellerId, // UUID (app_users.id)
+          card_type_id: Number(cardTypeId),
+          movement_type: sellerMove,
+          qty: q,
+          note: (note || "").trim() || null,
+          created_at: nowIso,
+        },
+      ]);
+      if (v1.error) throw v1.error;
 
-      const r = await supabase.rpc("vendor_stock_move", payload);
-      if (r.error) throw r.error;
+      // 2) حركة المخزون الرئيسي (card_movements)
+      const v2 = await supabase.from("card_movements").insert([
+        {
+          card_type_id: Number(cardTypeId),
+          movement_type: mainMove,
+          qty: q,
+          note: `vendor_custody(${sellerMove}) seller=${sellerId}${note ? ` | ${note}` : ""}`,
+          created_at: nowIso,
+        },
+      ]);
+      if (v2.error) throw v2.error;
 
-      toast("تم تسليم العهدة للبائع ✅", "ok");
+      toast(action === "IN" ? "تم تسليم العهدة للبائع ✅" : "تم استرجاع العهدة من البائع ✅", "ok");
       setQty("");
       setNote("");
       await refreshBalances(sellerId);
@@ -285,6 +370,7 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
       toast(e?.message || String(e), "err");
     } finally {
       setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -650,11 +736,17 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
             <select style={styles.select} value={sellerId} onChange={(e) => setSellerId(e.target.value)}>
               <option value="">— اختر —</option>
               {sellers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.username}
+                <option key={s.id} value={s.seller_uuid || ""} disabled={!s.seller_uuid}>
+                  {s.username}{!s.seller_uuid ? " (اربط UID)" : ""}
                 </option>
               ))}
             </select>
+            {needsSellerUidMap && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#b45309" }}>
+                لا يوجد عمود UUID في جدول <b>app_users</b> (مثل user_id / auth_id / uid / uuid) لربط البائع.
+                أضِف عمود UUID واملأه بقيمة المستخدم من auth.users، ثم حدّث الصفحة.
+              </div>
+            )}
           </div>
 
           <div>
@@ -681,10 +773,10 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
         </div>
 
         <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-start", flexWrap: "wrap" }}>
-          <button style={styles.btnPrimary} onClick={() => submitAssign("IN")} disabled={loading || pwBusy}>
+          <button style={styles.btnPrimary} onClick={() => submitAssign("IN")} disabled={loading || pwBusy || submitting}>
             تسليم (IN)
           </button>
-          <button style={styles.btn} onClick={() => submitAssign("OUT")} disabled={loading || pwBusy}>
+          <button style={styles.btn} onClick={() => submitAssign("OUT")} disabled={loading || pwBusy || submitting}>
             استرجاع عهدة (OUT)
           </button>
         </div>
