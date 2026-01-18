@@ -114,6 +114,7 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
   // settlement data
   const [invoices, setInvoices] = useState([]);
   const [deposits, setDeposits] = useState([]);
+  const [sellerPayments, setSellerPayments] = useState([]); // سندات/مدفوعات مرتبطة بالبائع
   const [editingDepId, setEditingDepId] = useState(null);
   const [editDepDate, setEditDepDate] = useState(todayISO());
   const [editDepAmount, setEditDepAmount] = useState("");
@@ -404,8 +405,23 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
       const depR = await depQ;
       if (depR.error) throw depR.error;
 
+      // payments / vouchers linked to seller (سندات قبض/صرف مرتبطة بالبائع)
+      // ملاحظة: نستخدم pay_date (DATE) وليس created_at
+      let payQ = supabase
+        .from("payments")
+        .select("id, pay_date, amount, payment_type, customer_id, invoice_id, note, seller_user_id")
+        .gte("pay_date", fromDate)
+        .lte("pay_date", toDate)
+        .order("pay_date", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (sid) payQ = payQ.eq("seller_user_id", sid);
+      const payR = await payQ;
+      if (payR.error) throw payR.error;
+
       setInvoices(invR.data || []);
       setDeposits(depR.data || []);
+      setSellerPayments(payR.data || []);
 
       toast("تم تحديث التسوية ✅", "ok");
     } catch (e) {
@@ -421,11 +437,14 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
     const paid = invoices.reduce((a, x) => a + safeNum(x.paid_amount), 0);
     const remaining = invoices.reduce((a, x) => a + safeNum(x.remaining_amount), 0);
     const deps = deposits.reduce((a, x) => a + safeNum(x.amount), 0);
+    const receipts = sellerPayments.reduce((a, x) => a + safeNum(x.amount), 0);
     // المطلوب من البائع = إجمالي المبيعات - التوريدات (لأن الدفع للعميل قد يكون ديون)
     // إذا تبغى تعتبر "المطلوب" = المتبقي على الفواتير (ديون العملاء) + (مبيعات كاش غير موردة) فهذا يحتاج منطق أعمق.
     const net = sales - deps;
-    return { sales, paid, remaining, deps, net };
-  }, [invoices, deposits]);
+    // الصافي المتوقع تسليمه فعلياً = (سندات القبض) - (التوريدات المسلمة)
+    const toHand = receipts - deps;
+    return { sales, paid, remaining, deps, receipts, net, toHand };
+  }, [invoices, deposits, sellerPayments]);
 
   const sellerName = (id) => sellers.find((s) => s.id === id)?.username || "";
   const cardName = (id) => cardTypes.find((c) => String(c.id) === String(id))?.name || `#${id}`;
@@ -476,6 +495,8 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
     <div class="kpi"><div class="t">إجمالي المتبقي (ديون العملاء)</div><div class="v">${money(totals.remaining)}</div></div>
     <div class="kpi"><div class="t">إجمالي التوريد</div><div class="v">${money(totals.deps)}</div></div>
     <div class="kpi"><div class="t">الصافي (البيع - التوريد)</div><div class="v">${money(totals.net)}</div></div>
+    <div class="kpi"><div class="t">سندات القبض (خارج الفواتير)</div><div class="v">${money(totals.receipts)}</div></div>
+    <div class="kpi"><div class="t">الصافي للتسليم</div><div class="v">${money(totals.toHand)}</div></div>
   </div>
 
   <h3>تفاصيل الفواتير</h3>
@@ -589,6 +610,7 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
       const basePay = {
         customer_id: null,
         invoice_id: null,
+        seller_user_id: sid,
         pay_date: depDate,
         amount: a,
         payment_type: "vendor_deposit",
@@ -597,14 +619,9 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
         note: payNote || null,
       };
 
-      // إذا payments عندك فيها created_by/source نضيفها، وإذا لا نعيد بدونها
-      let payIns = await supabase.from("payments").insert([
-        { ...basePay, created_by: actorId || null, source: "vendor_deposit" },
-      ]);
-
-      if (payIns.error && String(payIns.error?.message || "").includes("schema cache")) {
-        payIns = await supabase.from("payments").insert([basePay]);
-      }
+      // أدخل في payments (بدون أعمدة غير موجودة حتى ما نكسر الإدخال)
+      // لو عندك أعمدة إضافية مثل created_by/source ممكن تضيفها لاحقاً.
+      const payIns = await supabase.from("payments").insert([basePay]);
       if (payIns.error) throw payIns.error;
 
       toast("تم حفظ التوريد ✅", "ok");
@@ -781,6 +798,48 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
           </button>
         </div>
 
+        <div style={{ marginTop: 14, fontWeight: 900 }}>سندات/مدفوعات مرتبطة بالبائع ضمن الفترة</div>
+        <div style={{ color: "#666", fontSize: 12, marginTop: 4 }}>
+          هذه السندات تُستخدم لحساب ما تم تحصيله خلال الفترة (مثلاً ديون قديمة بدون فاتورة).
+        </div>
+        <div style={{ overflowX: "auto", marginTop: 8 }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>#</th>
+                <th style={styles.th}>التاريخ</th>
+                <th style={styles.th}>النوع</th>
+                <th style={styles.th}>المبلغ</th>
+                <th style={styles.th}>فاتورة</th>
+                <th style={styles.th}>عميل</th>
+                <th style={styles.th}>ملاحظة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sellerPayments
+                .filter((p) => p.payment_type !== "vendor_deposit")
+                .map((p, i) => (
+                  <tr key={p.id}>
+                    <td style={styles.td}>{i + 1}</td>
+                    <td style={styles.td}>{p.pay_date || ""}</td>
+                    <td style={styles.td}>{p.payment_type}</td>
+                    <td style={styles.td}>{money(p.amount)}</td>
+                    <td style={styles.td}>{p.invoice_id ?? "—"}</td>
+                    <td style={styles.td}>{p.customer_id ?? "—"}</td>
+                    <td style={styles.td}>{p.note || ""}</td>
+                  </tr>
+                ))}
+              {!sellerPayments.filter((p) => p.payment_type !== "vendor_deposit").length && (
+                <tr>
+                  <td style={styles.td} colSpan={7}>
+                    لا توجد سندات مرتبطة بالبائع ضمن الفترة.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
         <div style={styles.divider} />
 
         <div style={{ fontWeight: 900, marginBottom: 8 }}>الرصيد عند البائع</div>
@@ -859,6 +918,10 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
             <div style={styles.kpiVal}>{money(totals.paid)}</div>
           </div>
           <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>سندات قبض (غير الفواتير)</div>
+            <div style={styles.kpiVal}>{money(totals.receipts)}</div>
+          </div>
+          <div style={styles.kpi}>
             <div style={styles.kpiTitle}>إجمالي التوريد</div>
             <div style={styles.kpiVal}>{money(totals.deps)}</div>
           </div>
@@ -869,6 +932,14 @@ const confirmPassword = async (actionLabel = "تنفيذ العملية") => {
           <div style={styles.kpi}>
             <div style={styles.kpiTitle}>الصافي (البيع - التوريد)</div>
             <div style={styles.kpiVal}>{money(totals.net)}</div>
+          </div>
+          <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>سندات القبض (خارج الفواتير)</div>
+            <div style={styles.kpiVal}>{money(totals.receipts)}</div>
+          </div>
+          <div style={styles.kpi}>
+            <div style={styles.kpiTitle}>المفروض يسلم</div>
+            <div style={styles.kpiVal}>{money(totals.toHand)}</div>
           </div>
         </div>
 

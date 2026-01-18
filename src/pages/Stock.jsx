@@ -126,10 +126,12 @@ export default function Stock() {
         .select("*")
         .order("card_type_id", { ascending: true });
       if (eb) throw eb;
-      // Enrich balances with per-card thresholds (from card_types)
+      // Enrich balances with per-card metadata (name/price) + thresholds (from card_types)
+      // ملاحظة: بعض الـ views (مثل v_card_stock_summary) قد ترجع card_type_id + balance فقط
+      // بدون name/price، لذلك لازم نجيبها من card_types ونركّبها هنا.
       const { data: trows, error: et } = await supabase
         .from("card_types")
-        .select("id, low_stock_threshold, alert_qty, low_stock_alert");
+        .select("id, name, price, low_stock_threshold, alert_qty, low_stock_alert");
       if (et) throw et;
 
       const tmap = new Map((trows || []).map((r) => [Number(r.id), r]));
@@ -137,8 +139,22 @@ export default function Stock() {
         const t = tmap.get(Number(row.card_type_id));
         return {
           ...row,
-          name: row.name ?? row.card_name ?? row.card ?? row.card_type ?? row.cardType ?? row.cardtype ?? '',
-          balance: (row.balance ?? row.current_qty ?? row.stock_qty ?? row.qty ?? 0),
+          // name/price قد تكون NULL من الـ view، لذلك نأخذها من card_types
+          name:
+            row.name ??
+            row.card_type_name ??
+            row.card_name ??
+            row.card ??
+            row.card_type ??
+            row.cardType ??
+            row.cardtype ??
+            t?.name ??
+            "",
+          price: (row.price ?? t?.price ?? 0),
+          // نثبت الحقل اللي نعرضه في شاشة "رصيد الكروت" على أنه quantity
+          // مع الاحتفاظ بـ balance للتوافق مع باقي الكود.
+          quantity: Number(row.quantity ?? row.balance ?? row.current_qty ?? row.stock_qty ?? row.qty ?? 0),
+          balance: Number(row.balance ?? row.quantity ?? row.current_qty ?? row.stock_qty ?? row.qty ?? 0),
           low_stock_threshold:
             (t && (t.low_stock_threshold ?? t.alert_qty)) ?? row.low_stock_threshold,
           alert_qty: (t && t.alert_qty) ?? row.alert_qty,

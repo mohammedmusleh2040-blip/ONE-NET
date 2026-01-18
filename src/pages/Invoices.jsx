@@ -52,6 +52,7 @@ export default function Invoices() {
   const user = currentUser?.() || null;
   const isSuper = (user?.role === 'super_admin') || perms?.super_admin === true;
   const isSeller = String(user?.role || '').toLowerCase() === 'seller';
+  const canUseCashier = isSeller;
   const [posMode, setPosMode] = useState(() => isSeller);
   const [vendorStock, setVendorStock] = useState([]);
   const canEditInvoice = isSuper || perms?.invoices_edit === true;
@@ -76,6 +77,28 @@ export default function Invoices() {
     setToast({ open: true, text, type });
     toastTimer.current = setTimeout(() => setToast({ open: false, text: "", type: "ok" }), 2200);
   };
+
+  // ===== Cashier summary (for seller) =====
+  // الهدف: عرض إجمالي مبيعات البائع خلال فترة (من/إلى)
+  // مع إجمالي التحصيل داخل نفس الفترة.
+  const [cashierFrom, setCashierFrom] = useState(todayISO());
+  const [cashierTo, setCashierTo] = useState(todayISO());
+  const [cashierLoading, setCashierLoading] = useState(false);
+  const [cashierSummary, setCashierSummary] = useState({
+    invoicesCount: 0,
+    salesTotal: 0, // إجمالي الفواتير
+    invoicesCollectedTotal: 0, // مجموع المدفوع داخل الفواتير
+    invoicesRemainingTotal: 0, // مجموع المتبقي داخل الفواتير
+
+    paymentsInTotal: 0, // سندات قبض
+    paymentsOutTotal: 0, // سندات صرف
+
+    // “المبلغ المفروض يكون معه” = (المدفوع داخل الفواتير) + (قبض السندات) - (صرف السندات)
+    collectedTotal: 0,
+
+    // إجمالي المتبقي (ديون العملاء) من الفواتير داخل الفترة
+    remainingTotal: 0,
+  });
 
   // ===== Master data =====
   const [customers, setCustomers] = useState([]);
@@ -109,6 +132,9 @@ export default function Invoices() {
   const [clientUid, setClientUid] = useState(null);
 
   const [editMode, setEditMode] = useState(false);
+  // بعض أجزاء الكود كانت تعتمد على متغير باسم isEditMode
+  // حفاظاً على التوافق نعرّفه بناءً على editMode
+  const isEditMode = !!editMode;
   const [editInvoiceId, setEditInvoiceId] = useState(null);
   const [editOldLines, setEditOldLines] = useState([]);
 
@@ -126,6 +152,8 @@ export default function Invoices() {
   // Discount + payment now
   const [discountPercent, setDiscountPercent] = useState(0);
   const [paidAmount, setPaidAmount] = useState(0);
+  // POS/Cashier helper (useful for sellers)
+  const [cashReceived, setCashReceived] = useState("");
 
   // Lines (cards)
   const [selCardId, setSelCardId] = useState("");
@@ -181,6 +209,23 @@ export default function Invoices() {
   const totalAfterDiscount = useMemo(() => Math.max(0, subtotal - discountValue), [subtotal, discountValue]);
   const remaining = useMemo(() => Math.max(0, totalAfterDiscount - safeNum(paidAmount)), [totalAfterDiscount, paidAmount]);
 
+  // ===== POS/Cashier =====
+  const cashReceivedNum = useMemo(() => safeNum(cashReceived), [cashReceived]);
+  const cashierPaid = useMemo(() => Math.min(totalAfterDiscount, cashReceivedNum), [totalAfterDiscount, cashReceivedNum]);
+  const cashierChange = useMemo(() => Math.max(0, cashReceivedNum - totalAfterDiscount), [cashReceivedNum, totalAfterDiscount]);
+  const cashierRemaining = useMemo(() => Math.max(0, totalAfterDiscount - cashReceivedNum), [totalAfterDiscount, cashReceivedNum]);
+
+  // If POS mode is enabled, keep "paidAmount" aligned with what cashier received (so the invoice saves correctly)
+  useEffect(() => {
+    if (!posMode) return;
+    if (isEditMode) return;
+    if (cashReceived === "" || cashReceived == null) return;
+    const nextPaid = cashierPaid;
+    if (Math.abs(safeNum(paidAmount) - safeNum(nextPaid)) > 0.00001) {
+      setPaidAmount(nextPaid);
+    }
+  }, [posMode, isEditMode, cashReceived, cashierPaid, paidAmount]);
+
   // ===== دين العميل =====
   const customerDebt = useMemo(() => {
     if (!selectedCustomer) return 0;
@@ -232,87 +277,83 @@ export default function Invoices() {
 
   
   async function loadCardBalances() {
-    // ✅ مصدر واحد للعرض: ندمج (الرصيد من v_card_balances) + (الاسم/السعر من card_types)
-    const [{ data: balData, error: balErr }, typeRes1] = await Promise.all([
-      supabase.from("v_card_balances").select("*"),
-      // نحاول أولاً بجلب selling_price (لو موجود في بعض النسخ)، وإذا غير موجود نرجع price فقط
-      supabase.from("card_types").select("id,name,price,selling_price").order("id", { ascending: true }),
-    ]);
+    // مصدر الرصيد حسب نوع المستخدم:
+    // - Admin/Manager: من المخزون العام (card_balances)
+    // - Seller: من عهدة البائع (v_vendor_stock_balances)
 
-    if (balErr) throw balErr;
+    if (isSeller) {
+      const q = supabase
+        .from("v_vendor_stock_balances")
+        .select("card_type_id, card_name, price, balance")
+        .eq("seller_user_id", user?.id)
+        .order("price", { ascending: true });
 
-    let typesData = typeRes1?.data || [];
-    let typesErr = typeRes1?.error;
-
-    if (typesErr) {
-      // 42703 = column does not exist (مثل selling_price)
-      if (typesErr.code === "42703" || String(typesErr.message || "").includes("does not exist")) {
-        const typeRes2 = await supabase
-          .from("card_types")
-          .select("id,name,price")
-          .order("id", { ascending: true });
-        typesData = typeRes2.data || [];
-        typesErr = typeRes2.error;
+      const { data, error } = await q;
+      if (error) {
+        console.error("loadCardBalances(seller)", error);
+        setCards([]);
+        return;
       }
+
+      const mapped = (data || []).map((r) => ({
+        card_type_id: r.card_type_id,
+        name: r.card_name,
+        price: Number(r.price || 0),
+        // quantity المتاح للبائع
+        quantity: Number(r.balance || 0),
+      }));
+
+      setCards(mapped);
+      return;
     }
 
-    if (typesErr) {
-      console.warn("card_types load warning:", typesErr);
-      typesData = typesData || [];
+    // Admin / non-seller
+    const { data: balances, error } = await supabase
+      .from("v_card_balances")
+      .select("card_type_id, balance");
+
+    if (error) {
+      console.error("loadCardBalances(admin)", error);
+      return;
     }
 
-    // maps
-    const typeMap = {};
-    (typesData || []).forEach((t) => {
-      const id = t?.id;
-      if (id == null) return;
-      typeMap[String(id)] = {
-        name: t?.name ?? "",
-        price: safeNum(t?.selling_price ?? t?.price ?? 0),
-      };
-    });
+    const balMap = new Map(
+      (balances || []).map((r) => [r.card_type_id, Number(r.balance || 0)])
+    );
 
-    const balMap = {};
-    (balData || []).forEach((r) => {
-      const id = r.card_type_id ?? r.ct_id ?? r.id ?? null;
-      if (id == null) return;
-      balMap[String(id)] = safeNum(r.quantity ?? r.qty ?? r.balance ?? 0);
-    });
+    // عندنا card types + price من card_types
+    const { data: types, error: typeErr } = await supabase
+      .from("card_types")
+      .select("id,name,price")
+      .order("price", { ascending: true });
 
-    // ادمجهم بنفس ترتيب card_types (حتى تظهر كل الأنواع)
-    const merged = (typesData || []).map((t) => {
-      const id = String(t.id);
-      const meta = typeMap[id] || { name: "", price: 0 };
-      return {
-        card_type_id: t.id,
-        name: meta.name,
-        price: meta.price,
-        quantity: safeNum(balMap[id] ?? 0),
-      };
-    });
+    if (typeErr) {
+      console.error("loadCardTypes", typeErr);
+      return;
+    }
+
+    const merged = (types || []).map((t) => ({
+      card_type_id: t.id,
+      name: t.name,
+      price: Number(t.price || 0),
+      quantity: Number(balMap.get(t.id) || 0),
+    }));
 
     setCards(merged);
-
-    if (!selCardId && merged.length) {
-      setSelCardId(String(merged[0].card_type_id));
-      setSelPrice(merged[0].price);
-    }
   }
 
-
-  
   async function loadVendorStock() {
     try {
       if (!isSeller) { setVendorStock([]); return; }
       // vendor_stock: seller_user_id (uuid) + card_type_id + qty
       const { data, error } = await supabase
-        .from("vendor_stock")
-        .select("card_type_id, qty, card_name")
-        .eq("seller_user_id", user?.id || null)
-        .order("card_type_id", { ascending: true });
+        .from("v_vendor_stock_balances")
+        .select("card_type_id, card_name, price, balance")
+        .eq("seller_user_id", user?.id)
+        .order("price", { ascending: true });
 
       if (error) throw error;
-      setVendorStock(Array.isArray(data) ? data : []);
+      setVendorStock(Array.isArray(data) ? data.map((r) => ({ card_type_id: r.card_type_id, qty: Number(r.balance || 0), card_name: r.card_name })) : []);
     } catch (e) {
       console.error(e);
       // لا نوقف الصفحة لو جدول العهدة غير موجود بعد
@@ -320,34 +361,144 @@ export default function Invoices() {
     }
   }
 
-  async function rpcVendorMove({ seller_user_id, card_type_id, qty, noteText, created_at_iso, movement_type }) {
-    // RPC اسمها المقترح: vendor_stock_move
-    // تحاول بتوقيعين (مع created_at أو بدون)
-    let res = await supabase.rpc("vendor_stock_move", {
-      p_actor_id: user?.id || null,
-      p_actor_id: user?.id || null,
-      p_seller_user_id: seller_user_id,
-      p_card_type_id: Number(card_type_id),
-      p_movement_type: String(movement_type || "OUT").toUpperCase(),
-      p_qty: Number(qty),
-      p_note: noteText || null,
-      p_created_at: created_at_iso || null,
-    });
-    if (!res.error) return res.data;
+  async function rpcVendorMove({ card_type_id, qty, noteText, movement_type, ref_id, invoice_id, movement_date }) {
+    // RPC: vendor_stock_move_v2
+    // ملاحظة: بعض البيئات قد لا يكون فيها EXECUTE مفعل على الدالة عبر REST،
+    // لذلك لا نخلي العملية توقف تعديل الفاتورة لو الـ RPC غير متاح.
 
-    res = await supabase.rpc("vendor_stock_move", {
-      p_actor_id: user?.id || null,
-      p_seller_user_id: seller_user_id,
-      p_card_type_id: Number(card_type_id),
-      p_movement_type: String(movement_type || "OUT").toUpperCase(),
-      p_qty: Number(qty),
-      p_note: noteText || null,
-    });
-    if (!res.error) return res.data;
+    // لازم يكون ref_id رقم صحيح (invoice.id). لو صار undefined/NaN
+    // كان يسبب: ref_id=eq.NaN في REST ويكسر الحفظ.
+    const refIdNumRaw = Number(ref_id);
+    const refIdNumFromText = Number(String(ref_id || '').match(/(\d+)/)?.[1]);
+    const refIdNum = Number.isFinite(refIdNumRaw) ? refIdNumRaw : refIdNumFromText;
 
-    throw res.error;
+    const invIdNumRaw = Number(invoice_id);
+    const invIdNumFromText = Number(String(invoice_id || '').match(/(\d+)/)?.[1]);
+    const invIdNum = Number.isFinite(invIdNumRaw)
+      ? invIdNumRaw
+      : (Number.isFinite(invIdNumFromText) ? invIdNumFromText : refIdNum);
+
+    if (!Number.isFinite(refIdNum)) {
+      // ما ننفذ أي استعلامات على card_movements بدون ref_id صحيح.
+      return { ok: false, skipped: true, reason: 'missing_ref_id' };
+    }
+
+    const cardTypeNum = Number(card_type_id);
+    const qtyNum = Number(qty || 0);
+    if (!Number.isFinite(cardTypeNum) || cardTypeNum <= 0) {
+      return { ok: false, skipped: true, reason: 'missing_card_type' };
+    }
+    if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+      return { ok: false, skipped: true, reason: 'zero_qty' };
+    }
+
+    const payload = {
+      p_card_type_id: cardTypeNum,
+      p_movement_type: String(movement_type || 'OUT').toUpperCase(),
+      p_qty: qtyNum,
+      p_note: noteText || null,
+      p_ref_type: 'invoice',
+      p_ref_id: refIdNum,
+      p_invoice_id: invIdNum,
+      p_movement_date: (movement_date ? String(movement_date) : '').slice(0, 10) || null,
+    };
+
+    try {
+      // حاول تحديث سجل موجود لتجنب uq_card_movements_ref_unique
+      const { data: existing, error: exErr } = await supabase
+        .from('card_movements')
+        .select('id')
+        .eq('ref_type', 'invoice')
+        .eq('ref_id', payload.p_ref_id)
+        .eq('movement_type', payload.p_movement_type)
+        .maybeSingle();
+
+      if (!exErr && existing?.id) {
+        const { error: upErr } = await supabase
+          .from('card_movements')
+          .update({
+            card_type_id: payload.p_card_type_id,
+            qty: payload.p_qty,
+            note: payload.p_note,
+            invoice_id: payload.p_invoice_id,
+            movement_date: payload.p_movement_date,
+          })
+          .eq('id', existing.id);
+
+        if (!upErr) return { ok: true, updated: true, id: existing.id };
+      }
+
+      const res = await supabase.rpc('vendor_stock_move_v2', payload);
+
+      if (res?.error) {
+        // لو PostgREST ما لقى الدالة (schema cache/permissions) لا نوقف حفظ الفاتورة
+        if (res.error.code === 'PGRST202' || res.error.code === 'PGRST203') {
+          console.warn('vendor_stock_move_v2 not available via REST:', res.error);
+          return { ok: false, skipped: true, reason: res.error.code };
+        }
+        throw res.error;
+      }
+
+      return { ok: true, data: res.data };
+    } catch (e) {
+      // 404 / schema-cache: لا نخليها توقف حفظ الفاتورة
+      const msg = String(e?.message || e || '');
+      if (msg.includes('404') || msg.includes('schema cache') || msg.includes('Could not find the function')) {
+        console.warn('vendor_stock_move_v2 call skipped:', e);
+        return { ok: false, skipped: true, reason: 'not_available' };
+      }
+      throw e;
+    }
   }
 
+  function sumQtyByCardType(invLines) {
+    const totals = new Map();
+    (invLines || []).forEach((l) => {
+      const ct = Number(l?.card_type_id ?? l?.cardTypeId);
+      const q = Number(l?.qty ?? l?.quantity ?? 0);
+      if (!ct || !q) return;
+      totals.set(ct, (totals.get(ct) || 0) + q);
+    });
+    return totals;
+  }
+
+  async function applyVendorOutByLines(invNumberOrId, invDateStr, invLines, sellerId) {
+    if (!sellerId) return;
+
+    const totals = sumQtyByCardType(invLines);
+
+    // مهم: بسبب uq_card_movements_ref_unique، نتوقع عادةً كرت واحد لكل فاتورة.
+    // لو فيه أكثر من كرت، راح يتم تحديث نفس الحركة بدل الإدخال المتكرر.
+    for (const [cardTypeId, totalQty] of totals.entries()) {
+      await rpcVendorMove({
+        card_type_id: cardTypeId,
+        qty: totalQty,
+        noteText: 'invoice movement',
+        movement_type: 'OUT',
+        ref_id: invNumberOrId,
+        invoice_id: invNumberOrId,
+        movement_date: invDateStr,
+      });
+    }
+  }
+
+  async function applyVendorInByLines(invNumberOrId, invDateStr, invLines, sellerId, reasonTag) {
+    if (!sellerId) return;
+
+    const totals = sumQtyByCardType(invLines);
+
+    for (const [cardTypeId, totalQty] of totals.entries()) {
+      await rpcVendorMove({
+        card_type_id: cardTypeId,
+        qty: totalQty,
+        noteText: reasonTag || 'رجوع',
+        movement_type: 'IN',
+        ref_id: invNumberOrId,
+        invoice_id: invNumberOrId,
+        movement_date: invDateStr,
+      });
+    }
+  }
   async function applyVendorOutByLines(invNumberOrId, invDateStr, invLines, sellerId) {
     for (const l of invLines) {
       const ctId = l.card_type_id;
@@ -425,6 +576,111 @@ async function loadInvoices(customersList = customers) {
   const cm = new Map((customersList || []).map((c) => [c.id, c.name]));
   setInvoices((data || []).map((x) => ({ ...x, customer_name: cm.get(x.customer_id) || "" })));
 }
+
+  // ملخص "الكاشير" للبائع: إجمالي المبيعات والمقبوضات خلال فترة
+  const loadCashierSummary = async () => {
+    // الهدف: يطلع للبائع "كم المفروض معاه" خلال فترة (مبيعات + قبض/صرف)
+    // - المبيعات: مجموع إجمالي الفواتير (invoice_date ضمن الفترة) للبائع
+    // - القبض/الصرف: من جدول payments حسب pay_date ضمن الفترة للبائع
+    if (!isSeller || !user?.id) return;
+
+    setCashierLoading(true);
+    try {
+      const fromDate = cashierFrom || todayISO();
+      const toDate = cashierTo || fromDate;
+
+      // 1) فواتير الفترة (حسب invoice_date)
+      const { data: invRows, error: invErr } = await supabase
+        .from("invoices")
+        .select("id,total_after_discount,paid_amount,remaining_amount,invoice_date")
+        .eq("seller_user_id", user.id)
+        .gte("invoice_date", fromDate)
+        .lte("invoice_date", toDate);
+      if (invErr) throw invErr;
+
+      const invs = invRows || [];
+      // Avoid undefined variable errors when rendering the cashier card.
+      const invoicesCount = invs.length;
+      const salesTotal = invs.reduce((s, x) => s + safeNum(x.total_after_discount), 0);
+      const invoicesRemainingTotal = invs.reduce(
+        (s, x) => s + safeNum(x.remaining_amount),
+        0
+      );
+      // بعض الفواتير قد لا تملأ paid_amount (حسب منطق الحفظ)، لذا نحسبه بشكل آمن:
+      const invoicesCollectedTotal = invs.reduce((s, x) => {
+        const paid = safeNum(x.paid_amount);
+        if (paid > 0) return s + paid;
+        // fallback: (الإجمالي - المتبقي)
+        const fallback = Math.max(0, safeNum(x.total_after_discount) - safeNum(x.remaining_amount));
+        return s + fallback;
+      }, 0);
+
+      // 2) قبض/صرف الفترة (مهم: قد يكون القبض على فواتير قديمة، لذلك نعتمد payments داخل الفترة)
+      //    لازم يكون payment.seller_user_id متعبّي عشان ينحسب ضمن تسوية البائع.
+      let paymentsInTotal = 0;
+      let paymentsOutTotal = 0;
+
+      // pay_date غالباً timestamp، لذلك نستخدم حدود اليوم كاملة حتى لا يختفي قبض آخر اليوم
+      const payFromTs = `${fromDate}T00:00:00.000Z`;
+      const payToTs = `${toDate}T23:59:59.999Z`;
+
+      const { data: payRows, error: payErr } = await supabase
+        .from("payments")
+        .select("amount,pay_date,seller_user_id")
+        .eq("seller_user_id", user.id)
+        .gte("pay_date", payFromTs)
+        .lte("pay_date", payToTs);
+
+      if (payErr) {
+        console.warn("payments query failed", payErr);
+      } else {
+        for (const p of payRows || []) {
+          const a = safeNum(p.amount);
+          if (a >= 0) paymentsInTotal += a;
+          else paymentsOutTotal += Math.abs(a);
+        }
+      }
+
+      // 3) الصافي الذي يفترض يكون مع البائع خلال الفترة
+      // المبلغ اللي "المفروض معه":
+      // - (مدفوعات الفواتير داخل الفترة) + (سندات القبض داخل الفترة) - (سندات الصرف داخل الفترة)
+      // ملاحظة: إذا كنت لا تسجل سند عند حفظ الفاتورة، فسيكون أغلب التحصيل من invoicesCollectedTotal.
+      const collectedTotal = invoicesCollectedTotal + paymentsInTotal - paymentsOutTotal;
+
+      setCashierSummary({
+        invoicesCount,
+        salesTotal,
+        invoicesCollectedTotal,
+        invoicesRemainingTotal,
+        paymentsInTotal,
+        paymentsOutTotal,
+        collectedTotal,
+        remainingTotal: invoicesRemainingTotal,
+      });
+    } catch (e) {
+      console.error(e);
+      showToast("تعذر حساب ملخص الكاشير (تأكد من جدول invoices/payments)", "err");
+      setCashierSummary({
+        invoicesCount: 0,
+        salesTotal: 0,
+        invoicesCollectedTotal: 0,
+        invoicesRemainingTotal: 0,
+        paymentsInTotal: 0,
+        paymentsOutTotal: 0,
+        collectedTotal: 0,
+        remainingTotal: 0,
+      });
+    } finally {
+      setCashierLoading(false);
+    }
+  };
+
+  // تحديث ملخص الكاشير عند تغيير الفترة أو بعد تحديث قائمة الفواتير
+  useEffect(() => {
+    if (!canUseCashier || !posMode) return;
+    loadCashierSummary();
+    // eslint-disable-next-line
+  }, [canUseCashier, posMode, user?.id, cashierFrom, cashierTo]);
 
 
   // ===== Init =====
@@ -1170,7 +1426,7 @@ try {
 
         invNumber = upInv.number || upInv.id;
 
-        // أدخل البنود الجديدة + خصم OUT
+        // أدخل البنود الجديدة
         if (invoiceType === "cards") {
           const lineRows = lines.map((l) => ({
             invoice_id: invoiceId,
@@ -1183,19 +1439,9 @@ try {
           const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
           if (liErr) throw liErr;
 
-          if (posMode) {
-            await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
-            await loadVendorStock();
-          } else {
-            if (posMode) {
-          await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
-          await loadVendorStock();
-        } else {
-          await applyCardOutByLines(invNumber, invoiceDate, lines);
-          await loadCardBalances();
-        }
-            await loadCardBalances();
-          }
+          // IMPORTANT: حركة المخزون تُدار من قاعدة البيانات (Trigger/RPC)
+          // - لو الفاتورة تخص بائع: تخصم من vendor_stock_movements
+          // - لو الفاتورة من المستودع: تخصم من card_movements/card_stock
         } else {
           const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
           const lineTotal = usage * safeNum(pricePerGb);
@@ -1246,7 +1492,7 @@ try {
       }
       invNumber = inserted.number || inserted.id;
 
-      // Insert line items + خصم مخزون
+      // Insert line items
       if (invoiceType === "cards") {
         const lineRows = lines.map((l) => ({
           invoice_id: invoiceId,
@@ -1259,14 +1505,7 @@ try {
         const { error: liErr } = await supabase.from("invoice_line_items").insert(lineRows);
         if (liErr) throw liErr;
 
-        // خصم OUT عبر RPC (ينشئ حركة ويحدث الرصيد)
-        if (posMode) {
-          await applyVendorOutByLines(invNumber, invoiceDate, lines, user?.id || null);
-          await loadVendorStock();
-        } else {
-          await applyCardOutByLines(invNumber, invoiceDate, lines);
-          await loadCardBalances();
-        }
+        // IMPORTANT: حركة المخزون تُدار من قاعدة البيانات (Trigger/RPC)
       } else {
         const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
         const lineTotal = usage * safeNum(pricePerGb);
@@ -1565,6 +1804,67 @@ try {
         </div>
       </div>
 
+      {/* ===== Seller Cashier Box ===== */}
+      {canUseCashier && posMode && (
+        <div style={{ ...styles.card, marginTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>🧾 كاشير البائع (ملخص الفترة)</div>
+              <div style={{ opacity: 0.75, fontSize: 12 }}>يعرض إجمالي الفواتير والمقبوض والمتبقي خلال الفترة المحددة لمراجعة الحسابات قبل تسليم العهدة.</div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ ...styles.label, margin: 0 }}>
+                من
+                <input type="date" value={cashierFrom} onChange={(e) => setCashierFrom(e.target.value)} style={styles.input} />
+              </label>
+              <label style={{ ...styles.label, margin: 0 }}>
+                إلى
+                <input type="date" value={cashierTo} onChange={(e) => setCashierTo(e.target.value)} style={styles.input} />
+              </label>
+              <button
+                className="btn btn-outline"
+                onClick={async () => {
+                  setCashierLoading(true);
+                  try {
+                    await loadCashierSummary();
+                  } finally {
+                    setCashierLoading(false);
+                  }
+                }}
+              >
+                {cashierLoading ? "..." : "تحديث الكاشير"}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
+            <div style={styles.kpiCard}>
+              <div style={styles.kpiTitle}>إجمالي المبيعات (الفواتير)</div>
+              <div style={styles.kpiValue}>{money(cashierSummary.salesTotal)}</div>
+              <div style={styles.kpiSub}>عدد الفواتير: {cashierSummary.invoicesCount}</div>
+            </div>
+            <div style={styles.kpiCard}>
+              <div style={styles.kpiTitle}>المقبوض داخل الفواتير</div>
+              <div style={styles.kpiValue}>{money(cashierSummary.invoicesCollectedTotal)}</div>
+              <div style={styles.kpiSub}>حسب paid_amount / (الإجمالي - المتبقي)</div>
+            </div>
+            <div style={styles.kpiCard}>
+              <div style={styles.kpiTitle}>المتبقي (آجل)</div>
+              <div style={styles.kpiValue}>{money(cashierSummary.invoicesRemainingTotal)}</div>
+              <div style={styles.kpiSub}>مجموع remaining_amount</div>
+            </div>
+            <div style={styles.kpiCard}>
+              <div style={styles.kpiTitle}>صافي المقبوض (فواتير + سندات)</div>
+              <div style={styles.kpiValue}>{money(cashierSummary.collectedTotal)}</div>
+              <div style={styles.kpiSub}>
+                سندات: +{money(cashierSummary.paymentsInTotal)} / -{money(cashierSummary.paymentsOutTotal)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading && <div style={styles.loading}>... جاري التحميل</div>}
 
       {/* ===== CREATE ===== */}
@@ -1792,6 +2092,37 @@ try {
               <input value={note} onChange={(e) => setNote(e.target.value)} style={styles.input} placeholder="اختياري..." />
             </label>
           </div>
+
+          {/* POS/Cashier box (mainly for sellers) */}
+          {canUseCashier && posMode && !editMode && (
+            <div style={styles.cashierBox}>
+              <div style={styles.cashierTitle}>كاشير</div>
+              <div style={styles.cashierGrid}>
+                <label style={styles.label}>
+                  المبلغ المستلم من العميل
+                  <input
+                    type="number"
+                    value={cashReceived}
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    style={styles.input}
+                    min="0"
+                    placeholder="مثال: 50"
+                  />
+                </label>
+
+                <div style={styles.cashierInfo}>
+                  المدفوع (يسجل تلقائياً): <b>{money(cashierPaid)}</b>
+                </div>
+                <div style={styles.cashierInfo}>
+                  المتبقي على العميل: <b>{money(cashierRemaining)}</b>
+                </div>
+                <div style={styles.cashierInfo}>
+                  الباقي للعميل: <b>{money(cashierChange)}</b>
+                </div>
+              </div>
+              <div style={styles.cashierHint}>إذا كتبت مبلغ المستلم، سيتم تحديث "المدفوع" تلقائياً (حتى قيمة الإجمالي بعد الخصم).</div>
+            </div>
+          )}
 
           <div style={styles.summaryRow}>
             <div style={styles.sumChip}>
@@ -2106,6 +2437,26 @@ const styles = {
   subTitle: { fontSize: 14, fontWeight: "bold", margin: "12px 0" },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
   grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 },
+  cashierBox: {
+    marginTop: 12,
+    padding: "12px 12px",
+    borderRadius: 16,
+    border: "1px solid var(--border)",
+    background: "rgba(255,255,255,0.04)",
+  },
+  cashierTitle: { fontSize: 13, fontWeight: 800, marginBottom: 8 },
+  cashierGrid: { display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 12, alignItems: "end" },
+  cashierInfo: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid var(--border)",
+    background: "var(--panel)",
+    fontSize: 13,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  cashierHint: { marginTop: 8, fontSize: 12, opacity: 0.75, lineHeight: 1.4 },
   grid4: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 12 },
   grid4b: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 },
   label: { display: "flex", flexDirection: "column", gap: 6, fontSize: 12, opacity: 0.95 },

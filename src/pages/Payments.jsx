@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
+import { currentUser } from "../lib/auth";
 // ===== Helpers =====
 const safeNum = (v) => {
   const n = Number(v);
@@ -47,6 +48,32 @@ async function syncInvoicePayments(invoiceId) {
 }
 
 export default function Payments() {
+  const me = currentUser?.() || null;
+  const role = String(me?.role || "").toLowerCase();
+  const isAdmin = role === "admin" || role === "owner" || role === "superadmin";
+  // أي حساب غير Admin نعتبره "حساب بائع" (عرض محدود على السندات الخاصة به فقط).
+  const isSeller = !isAdmin;
+  // أي حساب غير Admin نعتبره "حساب بائع" (عرض محدود).
+
+  const [authUserId, setAuthUserId] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!alive) return;
+      setAuthUserId(data?.user?.id || null);
+      setAuthReady(true);
+    }).catch(() => {
+      if (!alive) return;
+      setAuthUserId(null);
+      setAuthReady(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // تحميل السندات حسب الفلاتر + حسب دور المستخدم
+
   // ====== data ======
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
@@ -59,6 +86,14 @@ export default function Payments() {
   const [to, setTo] = useState(todayISO());
   const [method, setMethod] = useState("all"); // all | cash | bank | other
   const [customerId, setCustomerId] = useState("all");
+
+  // تحميل السندات حسب الفلاتر + حسب دور المستخدم
+  useEffect(() => {
+    if (!authReady) return;
+    loadPayments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, authUserId, from, to, method, customerId, q, isSeller, isAdmin]);
+
 
   // modal
   const [open, setOpen] = useState(false);
@@ -167,12 +202,13 @@ export default function Payments() {
       // ✅ لا يوجد عمود number في جدول payments عندك
       let q = supabase
         .from("payments")
-        .select("id,customer_id,invoice_id,amount,method,note,created_at")
+        .select("id,customer_id,invoice_id,amount,method,note,created_at,seller_user_id")
         .gte("created_at", from)
         .lt("created_at", toPlus1);
 
       if (method && method !== "all") q = q.eq("method", method);
       if (customerId && customerId !== "all") q = q.eq("customer_id", Number(customerId));
+      if (isSeller && authUserId) q = q.eq("seller_user_id", authUserId);
 
       const { data, error } = await q.order("created_at", { ascending: false });
 
@@ -190,7 +226,6 @@ export default function Payments() {
         setLoading(true);
         await loadCustomers();
         await loadInvoices();
-        await loadPayments();
       } catch (e) {
         console.error(e);
         alert(e?.message || "فشل تحميل السندات");
@@ -200,6 +235,16 @@ export default function Payments() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // تحميل السندات حسب الفلاتر (ويُعاد التحميل عند تغيير الفترة/الفلاتر أو عند جاهزية بيانات المستخدم)
+  useEffect(() => {
+    if (!authReady) return;
+    loadPayments().catch((e) => {
+      console.error(e);
+      alert(e?.message || "فشل تحميل السندات");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, authUserId, from, to, method, customerId, q, isSeller, isAdmin]);
 
   // ====== computed ======
   const custMap = useMemo(() => {
@@ -338,6 +383,7 @@ amount: amt,
       method: String(fMethod || ""),
       note: String(fNote || ""),
       created_at: fCreatedAt || new Date().toISOString(),
+      ...(isSeller && authUserId ? { seller_user_id: authUserId } : {}),
     };
 
     let res;
