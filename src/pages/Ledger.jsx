@@ -150,28 +150,54 @@ export default function Ledger() {
   async function loadMovements() {
     setLoading(true);
     try {
-      // نستخدم created_at للتصفية بالتاريخ لأن بعض الـ views ما فيها movement_date
-      const fromTs = `${from}T00:00:00`;
-      const toTs = `${to}T23:59:59.999`;
+      // ✅ الآن نعتمد على View التقرير الموحد (v_card_movements_report)
+      // لأنه فيه: رقم الفاتورة + العميل + المصدر + الرصيد قبل/بعد
+      // وفي حالة ما كان الـ View موجود لأي سبب، نرجع تلقائياً للجدول الأساسي.
 
-      // لاحظ: اعتمدنا هنا على الجدول الأساسي card_movements فقط لتفادي اختلاف أعمدة الـ views
-      setUsingView(false);
+      const fromDate = `${from}`; // YYYY-MM-DD
+      const toDate = `${to}`; // YYYY-MM-DD
 
-      let tq = supabase
-        .from("card_movements")
-        .select(
-          'id,card_type_id,movement_type,qty,before_qty,after_qty,note,created_at,card_types(name)'
-        )
-        .gte("created_at", fromTs)
-        .lte("created_at", toTs)
-        .order("created_at", { ascending: false });
+      const tryView = async () => {
+        setUsingView(true);
+        let qv = supabase
+          .from("v_card_movements_report")
+          .select(
+            "id,movement_date,stock_account_id,card_type_id,card_name,card_price,movement_type,qty,note,invoice_number,customer_name,invoice_source,balance_before,balance_after"
+          )
+          .gte("movement_date", fromDate)
+          .lte("movement_date", toDate)
+          .order("movement_date", { ascending: false })
+          .order("id", { ascending: false });
 
-      if (cardTypeId !== "all") tq = tq.eq("card_type_id", cardTypeId);
-      if (mType !== "all") tq = tq.eq("movement_type", mType);
+        if (cardTypeId !== "all") qv = qv.eq("card_type_id", cardTypeId);
+        if (mType !== "all") qv = qv.eq("movement_type", mType);
+        return await qv;
+      };
 
-      const res = await tq;
-      if (res.error) throw res.error;
-      setMoves(Array.isArray(res.data) ? res.data : []);
+      const viewRes = await tryView();
+      if (viewRes.error) {
+        console.warn("v_card_movements_report not available, fallback to card_movements", viewRes.error);
+
+        // fallback
+        setUsingView(false);
+        const fromTs = `${from}T00:00:00`;
+        const toTs = `${to}T23:59:59.999`;
+        let tq = supabase
+          .from("card_movements")
+          .select(
+            "id,card_type_id,movement_type,qty,before_qty,after_qty,note,created_at,card_types(name)"
+          )
+          .gte("created_at", fromTs)
+          .lte("created_at", toTs)
+          .order("created_at", { ascending: false });
+        if (cardTypeId !== "all") tq = tq.eq("card_type_id", cardTypeId);
+        if (mType !== "all") tq = tq.eq("movement_type", mType);
+        const res = await tq;
+        if (res.error) throw res.error;
+        setMoves(Array.isArray(res.data) ? res.data : []);
+      } else {
+        setMoves(Array.isArray(viewRes.data) ? viewRes.data : []);
+      }
     } catch (e) {
       console.error(e);
       alert(e?.message || "فشل تحميل حركة الكروت");
@@ -206,11 +232,11 @@ export default function Ledger() {
         invoice_no:
           r.invoice_no ?? r.invoice_number ?? r.invoice ?? inferredInvoice,
         source:
-          r.source ?? r.src ?? (inferredInvoice ? "invoice" : ""),
+          r.invoice_source ?? r.source ?? r.src ?? (inferredInvoice ? "invoice" : ""),
         note: noteText,
         // قد تأتي من View جاهز، وإذا غير موجودة سنحسبها
-        before_qty: r.before_qty ?? r.before ?? null,
-        after_qty: r.after_qty ?? r.after ?? null,
+        before_qty: r.before_qty ?? r.balance_before ?? r.before ?? null,
+        after_qty: r.after_qty ?? r.balance_after ?? r.after ?? null,
       };
     });
 
