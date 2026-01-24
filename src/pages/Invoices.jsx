@@ -181,6 +181,7 @@ export default function Invoices() {
   const [payMethod, setPayMethod] = useState("cash");
   const [payRef, setPayRef] = useState("");
   const [payNote, setPayNote] = useState("");
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const didInit = useRef(false);
 
@@ -803,8 +804,7 @@ async function loadInvoices(customersList = customers) {
   // ====== RPC (حركة مخزون) ======
   // هذا يضمن: حركة + تحديث card_stock + قبل/بعد داخل card_movements (لو دالتك تسويها)
   async function rpcCardMove({ card_type_id, movement_type, qty, noteText, movement_date }) {
-    // الأفضل: نعتمد تاريخ (date) فقط في الـ Ledger
-    let res = await supabase.rpc("apply_card_movement", {
+    const { data, error } = await supabase.rpc("apply_card_movement", {
       p_card_type_id: Number(card_type_id),
       p_movement_type: String(movement_type).toUpperCase(),
       p_qty: Number(qty),
@@ -812,22 +812,17 @@ async function loadInvoices(customersList = customers) {
       ...(movement_date ? { p_movement_date: String(movement_date) } : {}),
     });
 
-    if (!res.error) return res.data;
+    if (error) {
+      const status = error?.status || error?.statusCode;
+      // 409 = conflict (duplicate/constraint). Sometimes the first call actually succeeded and the UI only saw the conflict.
+      if (status === 409) {
+        console.warn("apply_card_movement conflict (ignored):", error);
+        return data;
+      }
+      throw error;
+    }
 
-    // محاولة 2: بدون p_created_at (لو الدالة عندك 4 باراميتر)
-    res = await supabase.rpc("apply_card_movement", {
-      p_card_type_id: Number(card_type_id),
-      p_movement_type: String(movement_type).toUpperCase(),
-      p_qty: Number(qty),
-      p_note: noteText || null,
-      ...(movement_date ? { p_movement_date: String(movement_date) } : {}),
-    });
-
-    if (!res.error) return res.data;
-
-    // لا نحاول أسماء مختلفة هنا لأن هذا غالبًا يولّد نفس الخطأ (توقيع غير مطابق).
-    // نعيد الخطأ الحقيقي لكي يظهر لك في الـ Console بوضوح.
-    throw res.error;
+    return data;
   }
 
   async function applyCardOutByLines(invNumberOrId, invDateStr, invLines) {
@@ -1603,6 +1598,7 @@ try {
     setPayMethod("cash");
     setPayRef("");
     setPayNote("");
+    setPayDate(new Date().toISOString().slice(0, 10));
     setPayModalOpen(true);
   }
 
@@ -1644,7 +1640,7 @@ try {
         method: payMethod,
         reference: payRef || null,
         note: payNote || null,
-        created_at: `${todayISO()}T12:00:00`,
+        created_at: `${payDate}T12:00:00`,
       });
       if (pErr) throw pErr;
 
@@ -2332,6 +2328,10 @@ try {
             </div>
 
             <div style={styles.grid2}>
+              <label style={styles.label}>
+                تاريخ السداد
+                <input type="date" value={payDate} onChange={(e)=>setPayDate(e.target.value)} style={styles.input} />
+              </label>
               <label style={styles.label}>
                 مبلغ السداد
                 <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} />

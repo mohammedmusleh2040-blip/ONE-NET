@@ -312,32 +312,50 @@ export default function Stock() {
   }
 
   // ====== Apply Movement
-  async function applyMovement() {
-    if (!cardTypeId) return alert("اختر نوع الكرت");
-    if (!qty || Number(qty) <= 0) return alert("الكمية يجب أن تكون أكبر من صفر");
+async function applyMovement() {
+  if (!cardTypeId) return alert("اختر نوع الكرت");
+  if (!qty || Number(qty) <= 0) return alert("الكمية يجب أن تكون أكبر من صفر");
 
-    const createdAt = useCustomDate ? new Date(movementDate).toISOString() : null;
+  // الحركة عندك في قاعدة البيانات تستقبل DATE فقط
+  const movementDateOnly = useCustomDate
+    ? String(movementDate).slice(0, 10) // من datetime-local ناخذ YYYY-MM-DD
+    : new Date().toISOString().slice(0, 10);
 
-    const { error } = await supabase.rpc("apply_card_movement", {
-      p_card_type_id: Number(cardTypeId),
-      p_movement_type: mode,
-      p_qty: Number(qty),
-      p_note: note || null,
-      p_created_at: createdAt,
-    });
+  // مهم: لازم ref_id يكون فريد لكل حركة (عشان ما يصير تعارض 409)
+  const refId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
-    if (error) {
-      console.error(error);
-      return alert("فشل الحركة (تأكد من الدالة + الرصيد)");
+  const payload = {
+    p_stock_account_id: 1,                 // غيّرها لو حساب المخزون عندك غير 1
+    p_card_type_id: Number(cardTypeId),
+    p_movement_type: String(mode).toUpperCase(), // IN / OUT
+    p_qty: parseInt(qty, 10),              // الدالة الثانية qty = integer
+    p_ref_type: "stock",
+    p_ref_id: refId,
+    p_note: note || null,
+    p_movement_date: movementDateOnly,
+  };
+
+  const { error } = await supabase.rpc("apply_card_movement", payload);
+
+  if (error) {
+    console.error(error);
+
+    // 409 غالباً بسبب تعارض (Unique) على ref_id/ref_type — بعد ما صرنا نولد refId فريد غالباً ما بتتكرر
+    if (String(error?.code || "") === "23505") {
+      return alert("فشل الحركة: يوجد تعارض (تم تسجيل نفس المرجع سابقاً). جرّب مرة ثانية.");
     }
 
-    setQty(1);
-    setNote("");
-    setUseCustomDate(false);
-    setMovementDate(dtLocalNow());
-    await loadData();
-    alert("تم تسجيل الحركة");
+    return alert(`فشل الحركة: ${error?.message || "تأكد من الدالة + الرصيد"}`);
   }
+
+  setQty(1);
+  setNote("");
+  setUseCustomDate(false);
+  setMovementDate(dtLocalNow());
+  await loadData();
+  alert("تم تسجيل الحركة");
+}
+
 
   // ====== Reverse with reason
   async function reverseMovement(row) {
