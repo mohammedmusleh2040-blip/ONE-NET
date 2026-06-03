@@ -418,7 +418,8 @@ const { error: wipeErr } = await supabase.rpc("admin_wipe_all", {
       ]);
       if (backupErr) throw backupErr;
 
-      
+ console.log("AUTH USER =", authData);
+console.log("AUTH ID =", authData?.user?.id);     
 
 const { error } = await supabase.rpc("admin_wipe_all", {
   p_actor_id: uid,
