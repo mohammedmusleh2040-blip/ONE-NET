@@ -415,10 +415,13 @@ const setField = (k, v) => {
       ]);
       if (backupErr) throw backupErr;
 
-      const { error } = await supabase.rpc("admin_wipe_all", {
-        p_token: token,
-        p_reset_ids: !!wipeAlsoResetIds,
-      });
+      const { data: authData } = await supabase.auth.getUser();
+
+const { error } = await supabase.rpc("admin_wipe_all", {
+  p_actor_id: authData?.user?.id,
+  p_reset_secret: token,
+  p_reset_ids: !!wipeAlsoResetIds,
+});
       if (error) throw error;
 
       setMsg("✅ تم الحذف الشامل");
