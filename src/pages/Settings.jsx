@@ -324,10 +324,10 @@ const setField = (k, v) => {
       if (!backup?.tables) throw new Error("ملف النسخة غير صحيح (tables غير موجودة)");
 
       // 1) wipe all existing data (RPC)
-const { data: authData } = await supabase.auth.getUser();
+
 
 const { error: wipeErr } = await supabase.rpc("admin_wipe_all", {
-  p_actor_id: authData?.user?.id,
+  p_actor_id: uid,
   p_reset_secret: token,
   p_reset_ids: true,
 });
