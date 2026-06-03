@@ -421,7 +421,7 @@ const { error: wipeErr } = await supabase.rpc("admin_wipe_all", {
       
 
 const { error } = await supabase.rpc("admin_wipe_all", {
-  p_actor_id: authData?.user?.id,
+  p_actor_id: uid,
   p_reset_secret: token,
   p_reset_ids: !!wipeAlsoResetIds,
 });
