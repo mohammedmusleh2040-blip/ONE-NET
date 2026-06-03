@@ -252,7 +252,11 @@ const setField = (k, v) => {
       // Store in Supabase (app_backups)
       // NOTE: app_backups.created_by is UUID (FK to auth.users). Store label separately.
       const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id || null;
+      const uid = currentUser()?.id || null;
+
+      console.log("CURRENT USER =", currentUser());
+      console.log("UID =", uid);
+      
       const label =
         currentUser()?.email ||
         currentUser()?.username ||
@@ -397,7 +401,11 @@ const { error: wipeErr } = await supabase.rpc("admin_wipe_all", {
 
       // حفظ النسخة في Supabase
       const { data: authData } = await supabase.auth.getUser();
-      const uid = authData?.user?.id || null;
+      const uid = currentUser()?.id || null;
+
+      console.log("CURRENT USER =", currentUser());
+      console.log("UID =", uid);
+      
       const label =
         authData?.user?.email ||
         currentUser()?.email ||
