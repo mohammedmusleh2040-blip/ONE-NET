@@ -140,7 +140,9 @@ export default function Invoices() {
 
   // ===== Create invoice =====
   const [invoiceType, setInvoiceType] = useState("cards"); // cards | giga
-  const [invoiceDate, setInvoiceDate] = useState(todayISO());
+  const [invoiceDate, setInvoiceDate] = useState(
+  new Date().toISOString().slice(0,16)
+);
   const [customerId, setCustomerId] = useState("");
   const [note, setNote] = useState("");
 
@@ -971,7 +973,8 @@ async function loadInvoices(customersList = customers) {
         number: "PREVIEW",
         customer_id: Number(customerId),
         invoice_type: invoiceType,
-        invoice_date: invoiceDate,
+        invoice_datetime: invoiceDate,
+invoice_date: invoiceDate.slice(0,10),
         seller_user_id: posMode ? (user?.id || null) : null,
         total_before_discount: subtotal,
         discount_percent: Math.max(0, Math.min(100, safeNum(discountPercent))),
@@ -1378,7 +1381,8 @@ try {
         client_uid: uid,
         customer_id: Number(customerId),
         invoice_type: invoiceType,
-        invoice_date: invoiceDate,
+        invoice_datetime: invoiceDate,
+invoice_date: invoiceDate.slice(0,10),
         seller_user_id: posMode ? (user?.id || null) : null,
         total_before_discount: subtotal,
         discount_percent: Math.max(0, Math.min(100, safeNum(discountPercent))),
