@@ -775,7 +775,7 @@ async function applyMovement() {
       <td>{safeNum(m.before_balance ?? m.before_qty ?? m.before ?? m.balance_before ?? 0)}</td>
       <td>{safeNum(m.after_balance ?? m.after_qty ?? m.after ?? m.balance_after ?? 0)}</td>
       <td style={{ color: "#334155" }}>{m.note || m.notes || ""}</td>
-      <td>{fmtDate(m.created_at || m.date || m.movement_date || "")}</td>
+      <td>{fmtDate(m.invoice_datetime || m.created_at || m.date || m.movement_date || "")}</td>
       <td>{m.op_type || m.operation_type || m.type || "عادية"}</td>
       <td style={{ textAlign: "center" }}>
         {/* Use the existing handlers implemented above */}
