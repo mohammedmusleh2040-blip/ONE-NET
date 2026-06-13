@@ -221,6 +221,8 @@ export default function Stock() {
 
       setMovements(movementsRows || []);
 
+      console.log("MOVEMENTS", movementsRows?.slice(0, 5));
+
       if (!cardTypeId && (b || []).length) setCardTypeId(String(b[0].card_type_id));
     } catch (e) {
       console.error(e);
