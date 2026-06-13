@@ -1812,11 +1812,21 @@ try {
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <label style={{ ...styles.label, margin: 0 }}>
                 من
-                <input type="date" value={cashierFrom} onChange={(e) => setCashierFrom(e.target.value)} style={styles.input} />
+                <input
+  type="datetime-local"
+  value={invoiceDate}
+  onChange={(e) => setInvoiceDate(e.target.value)}
+  style={styles.input}
+/>
               </label>
               <label style={{ ...styles.label, margin: 0 }}>
                 إلى
-                <input type="date" value={cashierTo} onChange={(e) => setCashierTo(e.target.value)} style={styles.input} />
+                <input
+  type="datetime-local"
+  value={invoiceDate}
+  onChange={(e) => setInvoiceDate(e.target.value)}
+  style={styles.input}
+/>
               </label>
               <button
                 className="btn btn-outline"
@@ -1882,7 +1892,12 @@ try {
           <div style={styles.grid3}>
             <label style={styles.label}>
               تاريخ الفاتورة
-              <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} style={styles.input} />
+              <input
+  type="datetime-local"
+  value={invoiceDate}
+  onChange={(e) => setInvoiceDate(e.target.value)}
+  style={styles.input}
+/>
             </label>
 
             <label style={styles.label}>
@@ -2330,7 +2345,12 @@ try {
             <div style={styles.grid2}>
               <label style={styles.label}>
                 تاريخ السداد
-                <input type="date" value={payDate} onChange={(e)=>setPayDate(e.target.value)} style={styles.input} />
+                <input
+  type="datetime-local"
+  value={invoiceDate}
+  onChange={(e) => setInvoiceDate(e.target.value)}
+  style={styles.input}
+/>
               </label>
               <label style={styles.label}>
                 مبلغ السداد
