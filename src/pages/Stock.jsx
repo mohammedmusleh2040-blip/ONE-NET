@@ -199,7 +199,7 @@ export default function Stock() {
   ref_type,
   ref_id,
   invoice_id,
-  invoices(invoice_datetime)
+  invoices!card_movements_invoice_fk(invoice_datetime)
 `)
           .order("id", { ascending: false })
           .limit(500);
