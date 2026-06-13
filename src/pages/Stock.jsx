@@ -203,6 +203,8 @@ export default function Stock() {
 `)
           .order("id", { ascending: false })
           .limit(500);
+        
+        console.log("RAW", raw?.[0]);
 
         if (rawErr) throw rawErr;
         movementsRows = (raw || []).map((r) => ({
