@@ -188,13 +188,26 @@ export default function Stock() {
       if (!hasTypeName) {
         const { data: raw, error: rawErr } = await supabase
           .from("card_movements")
-          .select("id, created_at, card_type_id, movement_type, qty, note, op_type, ref_type, ref_id")
+.select(`
+  id,
+  created_at,
+  card_type_id,
+  movement_type,
+  qty,
+  note,
+  op_type,
+  ref_type,
+  ref_id,
+  invoice_id,
+  invoices(invoice_datetime)
+`)
           .order("id", { ascending: false })
           .limit(500);
 
         if (rawErr) throw rawErr;
         movementsRows = (raw || []).map((r) => ({
           ...r,
+          invoice_datetime: r.invoices?.invoice_datetime || null,
           card_type_name: typeNameById.get(String(r.card_type_id)) || null,
           name: typeNameById.get(String(r.card_type_id)) || null,
         }));
