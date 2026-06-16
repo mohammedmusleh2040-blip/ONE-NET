@@ -81,136 +81,177 @@ export default function DailyCashReport() {
   }
 
   return (
-    <div style={{ padding: 20 }}>
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          marginBottom: 20,
-          flexWrap: "wrap",
-          alignItems: "center"
-        }}
-      >
-        <label>
-          من
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-          />
-        </label>
+    <>
+      <style>
+        {`
+          @media print {
 
-        <label>
-          إلى
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-          />
-        </label>
+            .no-print {
+              display: none !important;
+            }
 
-        <button onClick={loadReport}>
-          تحديث
-        </button>
+            aside {
+              display: none !important;
+            }
 
-        <button onClick={printReport}>
-          طباعة
-        </button>
-      </div>
+            main {
+              padding: 0 !important;
+              margin: 0 !important;
+            }
 
-      <div id="daily-report">
-        <h1>تقرير اليومية</h1>
+            body {
+              background: white !important;
+            }
 
-        <h3>
-          من {fromDate} إلى {toDate}
-        </h3>
+            #daily-report {
+              width: 100% !important;
+              margin: 0 !important;
+            }
 
-        <hr />
+            table {
+              width: 100% !important;
+            }
 
-        <h2>سندات القبض</h2>
+            @page {
+              size: A4 portrait;
+              margin: 10mm;
+            }
+          }
+        `}
+      </style>
 
-        <table
+      <div style={{ padding: 20 }}>
+        <div
+          className="no-print"
           style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            marginBottom: 20
+            display: "flex",
+            gap: 10,
+            marginBottom: 20,
+            flexWrap: "wrap",
+            alignItems: "center"
           }}
         >
-          <thead>
-            <tr>
-              <th style={{ border: "1px solid #000", padding: 8 }}>
-                الفاتورة
-              </th>
-              <th style={{ border: "1px solid #000", padding: 8 }}>
-                المبلغ
-              </th>
-            </tr>
-          </thead>
+          <label>
+            من
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
+          </label>
 
-          <tbody>
-            {payments.map((p) => (
-              <tr key={p.id}>
-                <td style={{ border: "1px solid #000", padding: 8 }}>
-                  {p.invoice_number}
-                </td>
-                <td style={{ border: "1px solid #000", padding: 8 }}>
-                  {Number(p.amount).toLocaleString()}
-                </td>
+          <label>
+            إلى
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </label>
+
+          <button onClick={loadReport}>
+            تحديث
+          </button>
+
+          <button onClick={printReport}>
+            طباعة
+          </button>
+        </div>
+
+        <div id="daily-report">
+          <h1>تقرير اليومية</h1>
+
+          <h3>
+            من {fromDate} إلى {toDate}
+          </h3>
+
+          <hr />
+
+          <h2>سندات القبض</h2>
+
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              marginBottom: 20
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #000", padding: 8 }}>
+                  الفاتورة
+                </th>
+                <th style={{ border: "1px solid #000", padding: 8 }}>
+                  المبلغ
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
 
-        <h3>
-          إجمالي القبض: {totalPayments.toLocaleString()}
-        </h3>
+            <tbody>
+              {payments.map((p) => (
+                <tr key={p.id}>
+                  <td style={{ border: "1px solid #000", padding: 8 }}>
+                    {p.invoice_number}
+                  </td>
+                  <td style={{ border: "1px solid #000", padding: 8 }}>
+                    {Number(p.amount).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-        <hr />
+          <h3>
+            إجمالي القبض: {totalPayments.toLocaleString()}
+          </h3>
 
-        <h2>المصروفات</h2>
+          <hr />
 
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            marginBottom: 20
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={{ border: "1px solid #000", padding: 8 }}>
-                البند
-              </th>
-              <th style={{ border: "1px solid #000", padding: 8 }}>
-                المبلغ
-              </th>
-            </tr>
-          </thead>
+          <h2>المصروفات</h2>
 
-          <tbody>
-            {expenses.map((e) => (
-              <tr key={e.id}>
-                <td style={{ border: "1px solid #000", padding: 8 }}>
-                  {e.category}
-                </td>
-                <td style={{ border: "1px solid #000", padding: 8 }}>
-                  {Number(e.amount).toLocaleString()}
-                </td>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              marginBottom: 20
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #000", padding: 8 }}>
+                  البند
+                </th>
+                <th style={{ border: "1px solid #000", padding: 8 }}>
+                  المبلغ
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
 
-        <h3>
-          إجمالي المصروفات: {totalExpenses.toLocaleString()}
-        </h3>
+            <tbody>
+              {expenses.map((e) => (
+                <tr key={e.id}>
+                  <td style={{ border: "1px solid #000", padding: 8 }}>
+                    {e.category}
+                  </td>
+                  <td style={{ border: "1px solid #000", padding: 8 }}>
+                    {Number(e.amount).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-        <hr />
+          <h3>
+            إجمالي المصروفات: {totalExpenses.toLocaleString()}
+          </h3>
 
-        <h2>
-          الصافي: {(totalPayments - totalExpenses).toLocaleString()}
-        </h2>
+          <hr />
+
+          <h2>
+            الصافي: {(totalPayments - totalExpenses).toLocaleString()}
+          </h2>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
