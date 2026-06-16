@@ -10,6 +10,7 @@ import Invoices from "./pages/Invoices";
 import Payments from "./pages/Payments";
 import Expenses from "./pages/Expenses";
 import Ledger from "./pages/Ledger";
+import DailyCashReport from "./pages/DailyCashReport";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Vendors from "./pages/Vendors";
@@ -32,10 +33,14 @@ export default function App() {
         <Route path="payments" element={<Payments />} />
         <Route path="expenses" element={<Expenses />} />
         <Route path="ledger" element={<Ledger />} />
+
+        {/* تقرير اليومية الجديد */}
+        <Route path="daily-report" element={<DailyCashReport />} />
+
         <Route path="users" element={<Users />} />
-        <Route path="/vendors" element={<Vendors />} />
         <Route path="settings" element={<Settings />} />
         <Route path="vendors" element={<Vendors />} />
+        <Route path="/vendors" element={<Vendors />} />
 
         {/* fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
