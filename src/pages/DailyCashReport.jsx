@@ -50,7 +50,7 @@ if (invoiceIds.length) {
 
 const finalPayments = (payRows || []).map((p) => ({
   ...p,
-  invoice_number: invoiceMap[p.invoice_id] || "-",
+  invoice_number: invoiceMap[p.invoice_id] || "-"
 }));
 
 const { data: expRows } = await supabase
@@ -65,14 +65,14 @@ setExpenses(expRows || []);
 
 setTotalPayments(
   finalPayments.reduce(
-    (s, r) => s + Number(r.amount || 0),
+    (sum, row) => sum + Number(row.amount || 0),
     0
   )
 );
 
 setTotalExpenses(
   (expRows || []).reduce(
-    (s, r) => s + Number(r.amount || 0),
+    (sum, row) => sum + Number(row.amount || 0),
     0
   )
 );
@@ -92,71 +92,60 @@ return (
 <> <style>
 {`
 @media print {
+.no-print {
+display: none !important;
+}
 
 ```
-      @page {
-        size: A4 portrait;
-        margin: 10mm;
-      }
+        body {
+          background: white;
+        }
 
-      body {
-        margin: 0;
-        background: white;
-      }
+        #daily-report {
+          width: 100%;
+        }
 
-      .no-print {
-        display: none !important;
-      }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
 
-      #daily-report {
-        width: 100%;
-        direction: rtl;
+        th,
+        td {
+          border: 1px solid #000;
+          padding: 6px;
+        }
       }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        page-break-inside: avoid;
-      }
-
-      tr {
-        page-break-inside: avoid;
-      }
-
-      th,td {
-        border: 1px solid #000;
-        padding: 6px;
-      }
-    }
-  `}
+    `}
   </style>
 
   <div className="card">
-
     <div
       className="no-print"
       style={{
         display: "flex",
         gap: 10,
         marginBottom: 20,
-        flexWrap: "wrap"
+        flexWrap: "wrap",
       }}
     >
-      <input
-        type="date"
-        value={fromDate}
-        onChange={(e) =>
-          setFromDate(e.target.value)
-        }
-      />
+      <label>
+        من
+        <input
+          type="date"
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+        />
+      </label>
 
-      <input
-        type="date"
-        value={toDate}
-        onChange={(e) =>
-          setToDate(e.target.value)
-        }
-      />
+      <label>
+        إلى
+        <input
+          type="date"
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+        />
+      </label>
 
       <button onClick={loadReport}>
         تحديث
@@ -167,28 +156,18 @@ return (
       </button>
     </div>
 
-    <div
-      id="daily-report"
-      style={{
-        background: "#fff",
-        padding: 20,
-        borderRadius: 10,
-        direction: "rtl"
-      }}
-    >
-      <h1 style={{ textAlign: "center" }}>
-        تقرير اليومية
-      </h1>
+    <div id="daily-report">
+      <h2>تقرير اليومية</h2>
 
-      <h3 style={{ textAlign: "center" }}>
+      <h3>
         من {fromDate} إلى {toDate}
       </h3>
 
       <hr />
 
-      <h2>سندات القبض</h2>
+      <h3>سندات القبض</h3>
 
-      <table>
+      <table className="table">
         <thead>
           <tr>
             <th>الفاتورة</th>
@@ -200,11 +179,7 @@ return (
           {payments.map((p) => (
             <tr key={p.id}>
               <td>{p.invoice_number}</td>
-              <td>
-                {Number(
-                  p.amount
-                ).toLocaleString()}
-              </td>
+              <td>{Number(p.amount).toLocaleString()}</td>
             </tr>
           ))}
         </tbody>
@@ -218,9 +193,9 @@ return (
 
       <hr />
 
-      <h2>المصروفات</h2>
+      <h3>المصروفات</h3>
 
-      <table>
+      <table className="table">
         <thead>
           <tr>
             <th>البند</th>
@@ -232,11 +207,7 @@ return (
           {expenses.map((e) => (
             <tr key={e.id}>
               <td>{e.category}</td>
-              <td>
-                {Number(
-                  e.amount
-                ).toLocaleString()}
-              </td>
+              <td>{Number(e.amount).toLocaleString()}</td>
             </tr>
           ))}
         </tbody>
@@ -250,12 +221,7 @@ return (
 
       <hr />
 
-      <h2
-        style={{
-          textAlign: "center",
-          color: "#0a7a2f"
-        }}
-      >
+      <h2>
         الصافي :
         {" "}
         {(totalPayments - totalExpenses).toLocaleString()}
