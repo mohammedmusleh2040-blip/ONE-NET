@@ -40,7 +40,7 @@ let invoiceMap = {};
 if (invoiceIds.length) {
   const { data: invRows } = await supabase
     .from("invoices")
-    .select("id,number")
+    .select("id, number")
     .in("id", invoiceIds);
 
   invoiceMap = Object.fromEntries(
@@ -76,7 +76,7 @@ setTotalExpenses(
     0
   )
 );
-
+```
 
 }
 
@@ -88,147 +88,107 @@ function printReport() {
 window.print();
 }
 
-return (
-<> <style>
-{`
-@media print {
-.no-print {
-display: none !important;
-}
+return ( <div className="card">
+<div
+style={{
+display: "flex",
+gap: 10,
+marginBottom: 20,
+flexWrap: "wrap",
+}}
+> <label>
+من
+<input
+type="date"
+value={fromDate}
+onChange={(e) => setFromDate(e.target.value)}
+/> </label>
 
+```
+    <label>
+      إلى
+      <input
+        type="date"
+        value={toDate}
+        onChange={(e) => setToDate(e.target.value)}
+      />
+    </label>
 
-        body {
-          background: white;
-        }
+    <button onClick={loadReport}>
+      تحديث
+    </button>
 
-        #daily-report {
-          width: 100%;
-        }
-
-        table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-
-        th,
-        td {
-          border: 1px solid #000;
-          padding: 6px;
-        }
-      }
-    `}
-  </style>
-
-  <div className="card">
-    <div
-      className="no-print"
-      style={{
-        display: "flex",
-        gap: 10,
-        marginBottom: 20,
-        flexWrap: "wrap",
-      }}
-    >
-      <label>
-        من
-        <input
-          type="date"
-          value={fromDate}
-          onChange={(e) => setFromDate(e.target.value)}
-        />
-      </label>
-
-      <label>
-        إلى
-        <input
-          type="date"
-          value={toDate}
-          onChange={(e) => setToDate(e.target.value)}
-        />
-      </label>
-
-      <button onClick={loadReport}>
-        تحديث
-      </button>
-
-      <button onClick={printReport}>
-        طباعة
-      </button>
-    </div>
-
-    <div id="daily-report">
-      <h2>تقرير اليومية</h2>
-
-      <h3>
-        من {fromDate} إلى {toDate}
-      </h3>
-
-      <hr />
-
-      <h3>سندات القبض</h3>
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th>الفاتورة</th>
-            <th>المبلغ</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {payments.map((p) => (
-            <tr key={p.id}>
-              <td>{p.invoice_number}</td>
-              <td>{Number(p.amount).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>
-        إجمالي القبض :
-        {" "}
-        {totalPayments.toLocaleString()}
-      </h3>
-
-      <hr />
-
-      <h3>المصروفات</h3>
-
-      <table className="table">
-        <thead>
-          <tr>
-            <th>البند</th>
-            <th>المبلغ</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {expenses.map((e) => (
-            <tr key={e.id}>
-              <td>{e.category}</td>
-              <td>{Number(e.amount).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>
-        إجمالي المصروفات :
-        {" "}
-        {totalExpenses.toLocaleString()}
-      </h3>
-
-      <hr />
-
-      <h2>
-        الصافي :
-        {" "}
-        {(totalPayments - totalExpenses).toLocaleString()}
-      </h2>
-    </div>
+    <button onClick={printReport}>
+      طباعة
+    </button>
   </div>
-</>
+
+  <div id="daily-report">
+    <h2>تقرير اليومية</h2>
+
+    <h3>
+      من {fromDate} إلى {toDate}
+    </h3>
+
+    <hr />
+
+    <h3>سندات القبض</h3>
+
+    <table className="table">
+      <thead>
+        <tr>
+          <th>الفاتورة</th>
+          <th>المبلغ</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {payments.map((p) => (
+          <tr key={p.id}>
+            <td>{p.invoice_number}</td>
+            <td>{Number(p.amount).toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    <h3>
+      إجمالي القبض: {totalPayments.toLocaleString()}
+    </h3>
+
+    <hr />
+
+    <h3>المصروفات</h3>
+
+    <table className="table">
+      <thead>
+        <tr>
+          <th>البند</th>
+          <th>المبلغ</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {expenses.map((e) => (
+          <tr key={e.id}>
+            <td>{e.category}</td>
+            <td>{Number(e.amount).toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+
+    <h3>
+      إجمالي المصروفات: {totalExpenses.toLocaleString()}
+    </h3>
+
+    <hr />
+
+    <h2>
+      الصافي: {(totalPayments - totalExpenses).toLocaleString()}
+    </h2>
+  </div>
+</div>
 ```
 
 );
