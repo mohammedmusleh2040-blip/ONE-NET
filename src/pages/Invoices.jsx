@@ -1537,13 +1537,16 @@ invoice_date: invoiceDate.slice(0,10),
   seller_user_id: user?.id || null
 });
 
-      await loadCardBalances();
-      await loadInvoices();
+} // <-- أضف هذا السطر
 
-      showToast(`تم حفظ الفاتورة: ${invNumber}`, "ok");
-      resetForm();
-      setTab("list");
-    } catch (e) {
+await loadCardBalances();
+await loadInvoices();
+
+showToast(`تم حفظ الفاتورة ${invNumber}`, "ok");
+resetForm();
+setTab("list");
+
+} catch (e) {
       console.error(e);
       showToast(e?.message || "فشل حفظ الفاتورة", "err");
     } finally {
