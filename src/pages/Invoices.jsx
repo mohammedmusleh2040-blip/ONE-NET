@@ -1525,16 +1525,17 @@ invoice_date: invoiceDate.slice(0,10),
       // سند تلقائي إذا مدفوع > 0
       if (safeNum(paidAmount) > 0) {
         await supabase.from("payments").insert({
-          customer_id: Number(customerId),
-          invoice_id: invoiceId,
-          amount: safeNum(paidAmount),
-          payment_type: "invoice",
-          method: "cash",
-          reference: null,
-          note: `سند تلقائي من الفاتورة ${invNumber}`,
-          created_at: `${invoiceDate}T12:00:00`,
-        });
-      }
+  customer_id: Number(customerId),
+  invoice_id: invoiceId,
+  pay_date: invoiceDate.slice(0,10),
+  amount: safeNum(paidAmount),
+  payment_type: "invoice",
+  method: "cash",
+  reference: null,
+  note: `سند تلقائي من الفاتورة ${invNumber}`,
+  created_at: `${invoiceDate.slice(0,10)}T12:00:00`,
+  seller_user_id: user?.id || null
+});
 
       await loadCardBalances();
       await loadInvoices();
@@ -1636,7 +1637,7 @@ invoice_date: invoiceDate.slice(0,10),
       const totalAfter = safeNum(invRow.total_after_discount);
       const remainingNew = Math.max(0, totalAfter - paidNew);
 
-      const { error: pErr } = await supabase.from("payments").insert({
+      const { error: pErr } = ({
         customer_id: invRow.customer_id,
         invoice_id: invId,
         amount: amt,
