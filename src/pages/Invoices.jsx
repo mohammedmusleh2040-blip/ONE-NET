@@ -1640,17 +1640,22 @@ setTab("list");
       const totalAfter = safeNum(invRow.total_after_discount);
       const remainingNew = Math.max(0, totalAfter - paidNew);
 
-      const { error: pErr } = ({
-        customer_id: invRow.customer_id,
-        invoice_id: invId,
-        amount: amt,
-        payment_type: "invoice",
-        method: payMethod,
-        reference: payRef || null,
-        note: payNote || null,
-        created_at: `${payDate}T12:00:00`,
-      });
-      if (pErr) throw pErr;
+      const { error: pErr } = await supabase
+  .from("payments")
+  .insert({
+    customer_id: invRow.customer_id,
+    invoice_id: invId,
+    pay_date: payDate,
+    amount: amt,
+    payment_type: "invoice",
+    method: payMethod,
+    reference: payRef || null,
+    note: payNote || null,
+    created_at: `${payDate}T12:00:00`,
+    seller_user_id: user?.id || null
+  });
+
+if (pErr) throw pErr;
 
       const { error: uErr } = await supabase
         .from("invoices")
