@@ -2,175 +2,268 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 export default function DailyCashReport() {
-  const today = new Date().toISOString().slice(0, 10);
+const today = new Date().toISOString().slice(0, 10);
 
-  const [reportDate, setReportDate] = useState(today);
+const [fromDate, setFromDate] = useState(today);
+const [toDate, setToDate] = useState(today);
 
-  const [payments, setPayments] = useState([]);
-  const [expenses, setExpenses] = useState([]);
+const [payments, setPayments] = useState([]);
+const [expenses, setExpenses] = useState([]);
 
-  const [totalPayments, setTotalPayments] = useState(0);
-  const [totalExpenses, setTotalExpenses] = useState(0);
+const [totalPayments, setTotalPayments] = useState(0);
+const [totalExpenses, setTotalExpenses] = useState(0);
 
-  async function loadReport() {
-    // سندات القبض
-    const { data: payRows } = await supabase
-      .from("payments")
-      .select(`
-        id,
+async function loadReport() {
+const { data: payRows } = await supabase
+.from("payments")
+.select(`         id,
         amount,
         invoice_id,
         note,
         pay_date
       `)
-      .eq("pay_date", reportDate)
-      .order("id", { ascending: false });
+.gte("pay_date", fromDate)
+.lte("pay_date", toDate)
+.order("id", { ascending: false });
 
-    // جلب أرقام الفواتير
-    const invoiceIds = [...new Set((payRows || [])
-      .map(p => p.invoice_id)
-      .filter(Boolean))];
+```
+const invoiceIds = [
+  ...new Set(
+    (payRows || [])
+      .map((p) => p.invoice_id)
+      .filter(Boolean)
+  ),
+];
 
-    let invoiceMap = {};
+let invoiceMap = {};
 
-    if (invoiceIds.length) {
-      const { data: invRows } = await supabase
-        .from("invoices")
-        .select("id,number")
-        .in("id", invoiceIds);
+if (invoiceIds.length) {
+  const { data: invRows } = await supabase
+    .from("invoices")
+    .select("id,number")
+    .in("id", invoiceIds);
 
-      invoiceMap = Object.fromEntries(
-        (invRows || []).map(i => [i.id, i.number])
-      );
+  invoiceMap = Object.fromEntries(
+    (invRows || []).map((i) => [i.id, i.number])
+  );
+}
+
+const finalPayments = (payRows || []).map((p) => ({
+  ...p,
+  invoice_number: invoiceMap[p.invoice_id] || "-",
+}));
+
+const { data: expRows } = await supabase
+  .from("expenses")
+  .select("*")
+  .gte("expense_date", fromDate)
+  .lte("expense_date", toDate)
+  .order("id", { ascending: false });
+
+setPayments(finalPayments);
+setExpenses(expRows || []);
+
+setTotalPayments(
+  finalPayments.reduce(
+    (s, r) => s + Number(r.amount || 0),
+    0
+  )
+);
+
+setTotalExpenses(
+  (expRows || []).reduce(
+    (s, r) => s + Number(r.amount || 0),
+    0
+  )
+);
+```
+
+}
+
+useEffect(() => {
+loadReport();
+}, [fromDate, toDate]);
+
+function printReport() {
+window.print();
+}
+
+return (
+<> <style>
+{`
+@media print {
+
+```
+      @page {
+        size: A4 portrait;
+        margin: 10mm;
+      }
+
+      body {
+        margin: 0;
+        background: white;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+
+      #daily-report {
+        width: 100%;
+        direction: rtl;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        page-break-inside: avoid;
+      }
+
+      tr {
+        page-break-inside: avoid;
+      }
+
+      th,td {
+        border: 1px solid #000;
+        padding: 6px;
+      }
     }
+  `}
+  </style>
 
-    const finalPayments = (payRows || []).map(p => ({
-      ...p,
-      invoice_number: invoiceMap[p.invoice_id] || "-"
-    }));
+  <div className="card">
 
-    // المصروفات
-    const { data: expRows } = await supabase
-      .from("expenses")
-      .select("*")
-      .eq("expense_date", reportDate)
-      .order("id", { ascending: false });
+    <div
+      className="no-print"
+      style={{
+        display: "flex",
+        gap: 10,
+        marginBottom: 20,
+        flexWrap: "wrap"
+      }}
+    >
+      <input
+        type="date"
+        value={fromDate}
+        onChange={(e) =>
+          setFromDate(e.target.value)
+        }
+      />
 
-    setPayments(finalPayments);
-    setExpenses(expRows || []);
+      <input
+        type="date"
+        value={toDate}
+        onChange={(e) =>
+          setToDate(e.target.value)
+        }
+      />
 
-    setTotalPayments(
-      finalPayments.reduce((s, r) => s + Number(r.amount || 0), 0)
-    );
+      <button onClick={loadReport}>
+        تحديث
+      </button>
 
-    setTotalExpenses(
-      (expRows || []).reduce((s, r) => s + Number(r.amount || 0), 0)
-    );
-  }
+      <button onClick={printReport}>
+        طباعة
+      </button>
+    </div>
 
-  useEffect(() => {
-    loadReport();
-  }, [reportDate]);
+    <div
+      id="daily-report"
+      style={{
+        background: "#fff",
+        padding: 20,
+        borderRadius: 10,
+        direction: "rtl"
+      }}
+    >
+      <h1 style={{ textAlign: "center" }}>
+        تقرير اليومية
+      </h1>
 
-  function printReport() {
-    window.print();
-  }
+      <h3 style={{ textAlign: "center" }}>
+        من {fromDate} إلى {toDate}
+      </h3>
 
-  return (
-    <div className="card">
-      <div
+      <hr />
+
+      <h2>سندات القبض</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>الفاتورة</th>
+            <th>المبلغ</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {payments.map((p) => (
+            <tr key={p.id}>
+              <td>{p.invoice_number}</td>
+              <td>
+                {Number(
+                  p.amount
+                ).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h3>
+        إجمالي القبض :
+        {" "}
+        {totalPayments.toLocaleString()}
+      </h3>
+
+      <hr />
+
+      <h2>المصروفات</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>البند</th>
+            <th>المبلغ</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {expenses.map((e) => (
+            <tr key={e.id}>
+              <td>{e.category}</td>
+              <td>
+                {Number(
+                  e.amount
+                ).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h3>
+        إجمالي المصروفات :
+        {" "}
+        {totalExpenses.toLocaleString()}
+      </h3>
+
+      <hr />
+
+      <h2
         style={{
-          display: "flex",
-          gap: 10,
-          marginBottom: 20
+          textAlign: "center",
+          color: "#0a7a2f"
         }}
       >
-        <input
-          type="date"
-          value={reportDate}
-          onChange={(e) => setReportDate(e.target.value)}
-        />
-
-        <button onClick={loadReport}>
-          تحديث
-        </button>
-
-        <button onClick={printReport}>
-          طباعة
-        </button>
-      </div>
-
-      <div id="daily-report">
-
-        <h2>تقرير اليومية</h2>
-
-        <h3>التاريخ: {reportDate}</h3>
-
-        <hr />
-
-        <h3>سندات القبض</h3>
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>الفاتورة</th>
-              <th>المبلغ</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {payments.map((p) => (
-              <tr key={p.id}>
-                <td>{p.invoice_number}</td>
-                <td>{Number(p.amount).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h3>
-          إجمالي القبض :
-          {" "}
-          {totalPayments.toLocaleString()}
-        </h3>
-
-        <hr />
-
-        <h3>المصروفات</h3>
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>البند</th>
-              <th>المبلغ</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {expenses.map((e) => (
-              <tr key={e.id}>
-                <td>{e.category}</td>
-                <td>{Number(e.amount).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h3>
-          إجمالي المصروفات :
-          {" "}
-          {totalExpenses.toLocaleString()}
-        </h3>
-
-        <hr />
-
-        <h2>
-          الصافي :
-          {" "}
-          {(totalPayments - totalExpenses).toLocaleString()}
-        </h2>
-
-      </div>
+        الصافي :
+        {" "}
+        {(totalPayments - totalExpenses).toLocaleString()}
+      </h2>
     </div>
-  );
+  </div>
+</>
+```
+
+);
 }
