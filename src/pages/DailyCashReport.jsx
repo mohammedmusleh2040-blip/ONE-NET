@@ -189,7 +189,6 @@ onChange={(e) => setFromDate(e.target.value)}
     </h2>
   </div>
 </div>
-```
 
 );
 }
