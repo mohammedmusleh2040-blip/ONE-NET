@@ -11,6 +11,7 @@ import Payments from "./pages/Payments";
 import Expenses from "./pages/Expenses";
 import Ledger from "./pages/Ledger";
 import DailyCashReport from "./pages/DailyCashReport";
+import CashBoxReport from "./pages/CashBoxReport";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Vendors from "./pages/Vendors";
@@ -41,6 +42,10 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="vendors" element={<Vendors />} />
         <Route path="/vendors" element={<Vendors />} />
+        <Route
+  path="cashbox"
+  element={<CashBoxReport />}
+/>
 
         {/* fallback */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
