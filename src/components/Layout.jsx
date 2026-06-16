@@ -114,17 +114,21 @@ export default function Layout() {
   }
 
   const items = [
-    { to: "/dashboard", label: "الرئيسية", icon: "home", show: !!perms.dashboard },
-    { to: "/customers", label: "العملاء", icon: "users", show: !!perms.customers },
-    { to: "/invoices", label: "الفواتير", icon: "file", show: !!perms.invoices },
-    { to: "/payments", label: "السندات", icon: "card", show: !!perms.payments },
-    { to: "/expenses", label: "المصروفات", icon: "cashflow", show: !!perms.expenses },
-    { to: "/ledger", label: "التقارير", icon: "chart", show: !!perms.ledger },
-    { to: "/stock", label: "المخزون", icon: "box", show: !!perms.stock },
-    { to: "/vendors", label: "عهدة الباعة", icon: "box", show: (!!perms.stock || !!perms.users) },
-    { to: "/users", label: "المستخدمين", icon: "lock", show: !!perms.users },
-    { to: "/settings", label: "الإعدادات", icon: "settings", show: !!perms.settings },
-  ];
+  { to: "/dashboard", label: "الرئيسية", icon: "home", show: !!perms.dashboard },
+  { to: "/customers", label: "العملاء", icon: "users", show: !!perms.customers },
+  { to: "/invoices", label: "الفواتير", icon: "file", show: !!perms.invoices },
+  { to: "/payments", label: "السندات", icon: "card", show: !!perms.payments },
+  { to: "/expenses", label: "المصروفات", icon: "cashflow", show: !!perms.expenses },
+
+  { to: "/daily-report", label: "تقرير اليومية", icon: "chart", show: true },
+
+  { to: "/ledger", label: "التقارير", icon: "chart", show: !!perms.ledger },
+
+  { to: "/stock", label: "المخزون", icon: "box", show: !!perms.stock },
+  { to: "/vendors", label: "عهدة الباعة", icon: "box", show: (!!perms.stock || !!perms.users) },
+  { to: "/users", label: "المستخدمين", icon: "lock", show: !!perms.users },
+  { to: "/settings", label: "الإعدادات", icon: "settings", show: !!perms.settings },
+];
 
   // On login page: render outlet only
   if (location.pathname === "/login") return <Outlet />;
