@@ -1533,14 +1533,6 @@ invoice_date: invoiceDate.slice(0,10),
 
       // سند تلقائي إذا مدفوع > 0
 
-      const invoiceTotal = safeNum(totalAfterDiscount);
-
-if (safeNum(paidAmount) > invoiceTotal) {
-  return showToast(
-    `المبلغ المدفوع أكبر من قيمة الفاتورة (${invoiceTotal})`,
-    "warn"
-  );
-}
       if (safeNum(paidAmount) > 0) {
         await supabase.from("payments").insert({
   customer_id: Number(customerId),
