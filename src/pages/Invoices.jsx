@@ -1376,6 +1376,15 @@ try {
 
       const uid = clientUid || crypto.randomUUID();
       setClientUid(uid);
+      const invoiceTotal = safeNum(totalAfterDiscount);
+const paid = safeNum(paidAmount);
+
+if (paid > invoiceTotal) {
+  return showToast(
+    `المبلغ المدفوع (${paid}) أكبر من قيمة الفاتورة (${invoiceTotal})`,
+    "warn"
+  );
+}
 
       const invRow = {
         client_uid: uid,
