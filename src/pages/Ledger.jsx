@@ -617,6 +617,7 @@ const [debtSearch, setDebtSearch] = useState("");
 
     }).filter(r=>r.balance>0);
 
+    console.log("ROWS =", rows);
     setCustomerDebts(rows);
 
   } catch(err){
