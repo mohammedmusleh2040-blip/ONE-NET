@@ -1302,26 +1302,25 @@ window.print();
       </thead>
 
       <tbody>
-        {customerDebts
-          .filter(c =>
-            c.name?.toLowerCase().includes(debtSearch.toLowerCase())
-          )
-          .map((c,i)=>(
-            <tr key={c.id}>
-              <td>{i+1}</td>
-              <td>{c.name}</td>
-            <td>{money(c.opening)}</td>
-            <td>{money(c.invoices)}</td>
-            <td>{money(c.payments)}</td>
-            <td>
-                <b style={{color:"red"}}>
-                  {money(c.balance)}
-                </b>
-              </td>
-            </tr>
-          ))
-        }
-      </tbody>
+{customerDebts
+  .filter(c =>
+    c.name?.toLowerCase().includes(debtSearch.toLowerCase())
+  )
+  .map((c, i) => (
+    <tr key={c.id}>
+      <td>{i + 1}</td>
+      <td>{c.name}</td>
+      <td>{money(c.opening)}</td>
+      <td>{money(c.invoices)}</td>
+      <td>{money(c.payments)}</td>
+      <td>
+        <b style={{ color: "red" }}>
+          {money(c.balance)}
+        </b>
+      </td>
+    </tr>
+))}
+</tbody>
     </table>
   </div>
 </>
