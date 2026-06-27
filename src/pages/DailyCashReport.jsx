@@ -16,9 +16,10 @@ export default function DailyCashReport() {
   async function loadReport() {
     const { data: payRows = [] } = await supabase
       .from("payments")
-      .select("id, amount, invoice_id, note, pay_date")
+      .select("id, amount, invoice_id, note, pay_date, method")
       .gte("pay_date", fromDate)
       .lte("pay_date", toDate)
+      .neq("method", "from_balance")
       .order("id", { ascending: false });
 
     const invoiceIds = [
