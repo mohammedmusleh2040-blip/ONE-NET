@@ -659,11 +659,11 @@ const [debtSearch, setDebtSearch] = useState("");
       (r, i) => `
 <tr>
 <td>${i + 1}</td>
-<td>${r.customer_name || ""}</td>
-<td>${Number(r.opening_balance || 0).toFixed(2)}</td>
-<td>${Number(r.invoice_total || 0).toFixed(2)}</td>
-<td>${Number(r.paid_total || 0).toFixed(2)}</td>
-<td>${Number(r.remaining || 0).toFixed(2)}</td>
+<td>${r.name || ""}</td>
+<td>${Number(r.opening || 0).toFixed(2)}</td>
+<td>${Number(r.invoices || 0).toFixed(2)}</td>
+<td>${Number(r.payments || 0).toFixed(2)}</td>
+<td>${Number(r.balance || 0).toFixed(2)}</td>
 </tr>`
     )
     .join("");
@@ -1309,11 +1309,11 @@ window.print();
           .map((c,i)=>(
             <tr key={c.id}>
               <td>{i+1}</td>
-              <td>{c.customer_name}</td>
-              <td>{money(c.opening_balance)}</td>
-              <td>{money(c.invoice_total)}</td>
-              <td>{money(c.paid_total)}</td>
-              <td>
+              <td>{c.name}</td>
+            <td>{money(c.opening)}</td>
+            <td>{money(c.invoices)}</td>
+            <td>{money(c.payments)}</td>
+            <td>
                 <b style={{color:"red"}}>
                   {money(c.balance)}
                 </b>
