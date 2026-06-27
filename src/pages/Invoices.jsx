@@ -2217,17 +2217,19 @@ if (paymentFilter === "refund") {
           <div style={styles.subTitle}>سجل الفواتير</div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
-            {!isSeller && (
-              <select
-                value={invScope}
-                onChange={(e) => setInvScope(e.target.value)}
-                style={{ ...styles.input, width: 220, cursor: "pointer" }}
-              >
-                <option value="all">الكل</option>
-                <option value="seller">فواتير البائع</option>
-                <option value="admin">فواتير الإدارة</option>
-              </select>
-        <select
+          {!isSeller && (
+  <select
+    value={invScope}
+    onChange={(e) => setInvScope(e.target.value)}
+    style={{ ...styles.input, width: 220, cursor: "pointer" }}
+  >
+    <option value="all">الكل</option>
+    <option value="seller">فواتير البائع</option>
+    <option value="admin">فواتير الإدارة</option>
+  </select>
+)}
+
+<select
   value={paymentFilter}
   onChange={(e) => setPaymentFilter(e.target.value)}
   style={{ ...styles.input, width: 220, cursor: "pointer" }}
@@ -2238,9 +2240,8 @@ if (paymentFilter === "refund") {
   <option value="unpaid">غير مدفوعة</option>
   <option value="refund">مرتجعة</option>
 </select>
-            )}
 
-            <input
+<input 
               value={invoiceSearch}
               onChange={(e) => setInvoiceSearch(e.target.value)}
               placeholder="بحث: رقم/اسم/نوع/حالة/تاريخ/ملاحظة..."
