@@ -1534,7 +1534,7 @@ invoice_date: invoiceDate.slice(0,10),
 
       // سند تلقائي إذا مدفوع > 0
 
-      if (safeNum(paidAmount) > 0) {
+      if (safeNum(paidAmount) > 0 && payMethod !== "from_balance") {
         await supabase.from("payments").insert({
   customer_id: Number(customerId),
   invoice_id: invoiceId,
