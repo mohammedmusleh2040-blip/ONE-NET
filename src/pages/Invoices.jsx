@@ -2214,6 +2214,57 @@ if (paymentFilter === "refund") {
           </div>
         </div>
       )}
+      function printFilteredInvoices() {
+  const w = window.open("", "_blank");
+
+  const rows = filteredInvoices.map(inv => `
+    <tr>
+      <td>${inv.number || ""}</td>
+      <td>${inv.customer_name || ""}</td>
+      <td>${inv.invoice_date || ""}</td>
+      <td>${Number(inv.total_amount || 0).toFixed(2)}</td>
+      <td>${Number(inv.paid_amount || 0).toFixed(2)}</td>
+      <td>${Number(inv.remaining_amount || 0).toFixed(2)}</td>
+    </tr>
+  `).join("");
+
+  w.document.write(`
+    <html dir="rtl">
+    <head>
+      <title>تقرير الفواتير</title>
+      <style>
+        body{font-family:Tahoma;padding:20px}
+        table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #999;padding:6px;text-align:center}
+        th{background:#eee}
+      </style>
+    </head>
+    <body>
+      <h2>تقرير الفواتير</h2>
+
+      <table>
+        <tr>
+          <th>رقم الفاتورة</th>
+          <th>العميل</th>
+          <th>التاريخ</th>
+          <th>الإجمالي</th>
+          <th>المدفوع</th>
+          <th>المتبقي</th>
+        </tr>
+
+        ${rows}
+
+      </table>
+
+      <script>
+        window.print();
+      </script>
+    </body>
+    </html>
+  `);
+
+  w.document.close();
+}
 
       {/* ===== LIST ===== */}
       {tab === "list" && (
@@ -2251,6 +2302,12 @@ if (paymentFilter === "refund") {
               placeholder="بحث: رقم/اسم/نوع/حالة/تاريخ/ملاحظة..."
               style={{ ...styles.input, width: "min(520px, 100%)" }}
             />
+            <button
+  onClick={printFilteredInvoices}
+  style={styles.btn}
+>
+  🖨️ طباعة القائمة
+</button>
           </div>
 
           <div style={styles.tableWrap}>
