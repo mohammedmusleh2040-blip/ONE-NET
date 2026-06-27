@@ -1712,7 +1712,11 @@ if (paymentFilter === "partial") {
 }
 
 if (paymentFilter === "unpaid") {
-  arr = arr.filter(inv => safeNum(inv.paid_amount) === 0);
+  arr = arr.filter(inv =>
+    !inv.is_refund &&
+    safeNum(inv.remaining_amount) > 0 &&
+    safeNum(inv.paid_amount) === 0
+  );
 }
 
 if (paymentFilter === "refund") {
