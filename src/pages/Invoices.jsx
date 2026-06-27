@@ -1729,7 +1729,7 @@ if (paymentFilter === "refund") {
       const note = String(inv?.note || "").toLowerCase();
       return id.includes(q) || customer.includes(q) || type.includes(q) || note.includes(q);
     });
-  }, [invoices, invoiceSearch, invScope, isSeller]);
+  }, [invoices, invoiceSearch, invScope, paymentFilter, isSeller]);
 
   const unpaidInvoices = useMemo(() => (filteredInvoices || []).filter((x) => safeNum(x.remaining_amount) > 0), [filteredInvoices]);
 
@@ -2227,6 +2227,17 @@ if (paymentFilter === "refund") {
                 <option value="seller">فواتير البائع</option>
                 <option value="admin">فواتير الإدارة</option>
               </select>
+        <select
+  value={paymentFilter}
+  onChange={(e) => setPaymentFilter(e.target.value)}
+  style={{ ...styles.input, width: 220, cursor: "pointer" }}
+>
+  <option value="all">كل حالات السداد</option>
+  <option value="paid">مدفوعة</option>
+  <option value="partial">مدفوعة جزئياً</option>
+  <option value="unpaid">غير مدفوعة</option>
+  <option value="refund">مرتجعة</option>
+</select>
             )}
 
             <input
