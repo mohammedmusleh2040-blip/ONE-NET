@@ -607,11 +607,11 @@ const [debtSearch, setDebtSearch] = useState("");
       const balance = opening + invTotal - payTotal;
 
       return {
-  id: c.id,
-  customer_name: c.name,
-  opening_balance: opening,
-  invoice_total: invTotal,
-  paid_total: payTotal,
+  id:c.id,
+  name:c.name,
+  opening,
+  invoices:invTotal,
+  payments:payTotal,
   balance
 };
 
