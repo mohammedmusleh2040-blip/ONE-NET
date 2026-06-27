@@ -171,6 +171,7 @@ export default function Invoices() {
   // Search in list
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invScope, setInvScope] = useState(() => (isSeller ? "seller" : "all"));
+  const [paymentFilter, setPaymentFilter] = useState("all");
 
   useEffect(() => {
     if (isSeller) setInvScope("seller");
@@ -1697,6 +1698,26 @@ if (pErr) throw pErr;
       if (invScope === "seller") arr = arr.filter((x) => !!x.seller_user_id);
       if (invScope === "admin") arr = arr.filter((x) => !x.seller_user_id);
     }
+    
+    // فلتر حالة السداد
+if (paymentFilter === "paid") {
+  arr = arr.filter(inv => safeNum(inv.remaining_amount) === 0);
+}
+
+if (paymentFilter === "partial") {
+  arr = arr.filter(inv =>
+    safeNum(inv.paid_amount) > 0 &&
+    safeNum(inv.remaining_amount) > 0
+  );
+}
+
+if (paymentFilter === "unpaid") {
+  arr = arr.filter(inv => safeNum(inv.paid_amount) === 0);
+}
+
+if (paymentFilter === "refund") {
+  arr = arr.filter(inv => inv.is_refund);
+}
 
     const q = invoiceSearch.trim().toLowerCase();
     if (!q) return arr;
