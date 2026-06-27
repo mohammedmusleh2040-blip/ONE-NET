@@ -607,13 +607,13 @@ const [debtSearch, setDebtSearch] = useState("");
       const balance = opening + invTotal - payTotal;
 
       return {
-        id:c.id,
-        name:c.name,
-        opening,
-        invoices:invTotal,
-        payments:payTotal,
-        balance
-      };
+  id: c.id,
+  customer_name: c.name,
+  opening_balance: opening,
+  invoice_total: invTotal,
+  paid_total: payTotal,
+  balance
+};
 
     }).filter(r=>r.balance>0);
 
@@ -633,17 +633,17 @@ const [debtSearch, setDebtSearch] = useState("");
   }
 
   const totalOpening = customerDebts.reduce(
-    (s, r) => s + Number(r.opening_balance || 0),
+    (s, r) => s + Number(r.opening || 0),
     0
   );
 
   const totalInvoices = customerDebts.reduce(
-    (s, r) => s + Number(r.invoice_total || 0),
+    (s, r) => s + Number(r.invoices || 0),
     0
   );
 
   const totalPaid = customerDebts.reduce(
-    (s, r) => s + Number(r.paid_total || 0),
+    (s, r) => s + Number(r.payments || 0),
     0
   );
 
@@ -657,10 +657,10 @@ const [debtSearch, setDebtSearch] = useState("");
       (r, i) => `
 <tr>
 <td>${i + 1}</td>
-<td>${r.customer_name || ""}</td>
-<td>${Number(r.opening_balance || 0).toFixed(2)}</td>
-<td>${Number(r.invoice_total || 0).toFixed(2)}</td>
-<td>${Number(r.paid_total || 0).toFixed(2)}</td>
+<td>${r.name || ""}</td>
+<td>${Number(r.opening || 0).toFixed(2)}</td>
+<td>${Number(r.invoices || 0).toFixed(2)}</td>
+<td>${Number(r.payments || 0).toFixed(2)}</td>
 <td>${Number(r.remaining || 0).toFixed(2)}</td>
 </tr>`
     )
@@ -912,7 +912,7 @@ window.print();
           ${rows
             .map(
               (r, i) => `
-            <tr><td style="border:1px solid #ddd;padding:6px;">${i + 1}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.customer_name || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td><td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td></tr>
+            <tr><td style="border:1px solid #ddd;padding:6px;">${i + 1}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.name || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td><td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td></tr>
           `
             )
             .join("")}
