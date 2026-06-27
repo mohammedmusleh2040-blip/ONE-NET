@@ -1303,7 +1303,7 @@ window.print();
       <tbody>
         {customerDebts
           .filter(c =>
-            c.name?.toLowerCase().includes(debtSearch.toLowerCase())
+            c.customer_name?.toLowerCase().includes(debtSearch.toLowerCase())
           )
           .map((c,i)=>(
             <tr key={c.id}>
