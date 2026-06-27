@@ -67,6 +67,9 @@ function getCardBalanceFromRow(row) {
 export default function Ledger() {
   // Tabs
   const [tab, setTab] = useState("cardMoves");
+  const [customerDebts, setCustomerDebts] = useState([]);
+const [debtsLoading, setDebtsLoading] = useState(false);
+const [debtSearch, setDebtSearch] = useState("");
 
 
   // ===== Auth / Seller Guard =====
@@ -570,6 +573,59 @@ export default function Ledger() {
       setLedgerLoading(false);
     }
   }
+  async function loadCustomerDebts() {
+  setDebtsLoading(true);
+
+  try {
+    const { data: customersData, error: cErr } = await supabase
+      .from("customers")
+      .select("id,name,opening_balance")
+      .order("name");
+
+    if (cErr) throw cErr;
+
+    const { data: invoices } = await supabase
+      .from("invoices")
+      .select("customer_id,total_after_discount");
+
+    const { data: payments } = await supabase
+      .from("payments")
+      .select("customer_id,amount");
+
+    const rows = (customersData || []).map((c) => {
+
+      const opening = Number(c.opening_balance || 0);
+
+      const invTotal = (invoices || [])
+        .filter(i => i.customer_id === c.id)
+        .reduce((a,b)=>a+Number(b.total_after_discount||0),0);
+
+      const payTotal = (payments || [])
+        .filter(p=>p.customer_id===c.id)
+        .reduce((a,b)=>a+Number(b.amount||0),0);
+
+      const balance = opening + invTotal - payTotal;
+
+      return {
+        id:c.id,
+        name:c.name,
+        opening,
+        invoices:invTotal,
+        payments:payTotal,
+        balance
+      };
+
+    }).filter(r=>r.balance>0);
+
+    setCustomerDebts(rows);
+
+  } catch(err){
+    console.error(err);
+    alert(err.message);
+  } finally{
+    setDebtsLoading(false);
+  }
+}
 
   const selectedCustomer = useMemo(() => {
     if (!custId) return null;
@@ -1027,6 +1083,12 @@ export default function Ledger() {
           <button className={"btn " + (tab === "customerLedger" ? "" : "btn-outline")} onClick={() => setTab("customerLedger")}>
             كشف حساب عميل
           </button>
+          <button
+  className={"btn " + (tab === "customerDebts" ? "" : "btn-outline")}
+  onClick={() => setTab("customerDebts")}
+>
+  ديون العملاء
+</button>
           <button className={"btn " + (tab === "giga" ? "" : "btn-outline")} onClick={() => setTab("giga")}>
             تقرير الجيجا
           </button>
@@ -1068,6 +1130,64 @@ export default function Ledger() {
               </button>
             </>
           )}
+          {tab === "customerDebts" && (
+<>
+  <div className="card">
+    <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+      <button
+        className="btn"
+        onClick={loadCustomerDebts}
+        disabled={debtsLoading}
+      >
+        {debtsLoading ? "جاري التحميل..." : "تحديث"}
+      </button>
+
+      <input
+        className="input"
+        placeholder="بحث باسم العميل..."
+        value={debtSearch}
+        onChange={(e)=>setDebtSearch(e.target.value)}
+        style={{maxWidth:300}}
+      />
+    </div>
+
+    <table className="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>العميل</th>
+          <th>الرصيد الافتتاحي</th>
+          <th>إجمالي الفواتير</th>
+          <th>إجمالي السداد</th>
+          <th>المتبقي</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {customerDebts
+          .filter(c =>
+            c.name?.toLowerCase().includes(debtSearch.toLowerCase())
+          )
+          .map((c,i)=>(
+            <tr key={c.id}>
+              <td>{i+1}</td>
+              <td>{c.name}</td>
+              <td>{money(c.opening)}</td>
+              <td>{money(c.invoices)}</td>
+              <td>{money(c.payments)}</td>
+              <td>
+                <b style={{color:"red"}}>
+                  {money(c.balance)}
+                </b>
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+</>
+)}
 
           {tab === "giga" && (
             <>
