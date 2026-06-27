@@ -626,6 +626,135 @@ const [debtSearch, setDebtSearch] = useState("");
     setDebtsLoading(false);
   }
 }
+  function printCustomerDebts() {
+  if (!customerDebts || customerDebts.length === 0) {
+    alert("لا توجد بيانات للطباعة");
+    return;
+  }
+
+  const totalOpening = customerDebts.reduce(
+    (s, r) => s + Number(r.opening_balance || 0),
+    0
+  );
+
+  const totalInvoices = customerDebts.reduce(
+    (s, r) => s + Number(r.invoice_total || 0),
+    0
+  );
+
+  const totalPaid = customerDebts.reduce(
+    (s, r) => s + Number(r.paid_total || 0),
+    0
+  );
+
+  const totalRemain = customerDebts.reduce(
+    (s, r) => s + Number(r.remaining || 0),
+    0
+  );
+
+  const rows = customerDebts
+    .map(
+      (r, i) => `
+<tr>
+<td>${i + 1}</td>
+<td>${r.customer_name || ""}</td>
+<td>${Number(r.opening_balance || 0).toFixed(2)}</td>
+<td>${Number(r.invoice_total || 0).toFixed(2)}</td>
+<td>${Number(r.paid_total || 0).toFixed(2)}</td>
+<td>${Number(r.remaining || 0).toFixed(2)}</td>
+</tr>`
+    )
+    .join("");
+
+  const w = window.open("", "_blank");
+
+  w.document.write(`
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>ديون العملاء</title>
+
+<style>
+body{
+font-family:Tahoma;
+padding:20px;
+}
+
+h2{
+text-align:center;
+margin-bottom:5px;
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+margin-top:20px;
+}
+
+th,td{
+border:1px solid #888;
+padding:8px;
+text-align:center;
+}
+
+th{
+background:#f0f0f0;
+}
+
+tfoot td{
+font-weight:bold;
+background:#fafafa;
+}
+</style>
+
+</head>
+
+<body>
+
+<h2>تقرير ديون العملاء</h2>
+
+<div>التاريخ: ${new Date().toLocaleDateString("ar-SA")}</div>
+
+<table>
+
+<thead>
+<tr>
+<th>#</th>
+<th>العميل</th>
+<th>الرصيد الافتتاحي</th>
+<th>إجمالي الفواتير</th>
+<th>إجمالي السداد</th>
+<th>المتبقي</th>
+</tr>
+</thead>
+
+<tbody>
+${rows}
+</tbody>
+
+<tfoot>
+<tr>
+<td colspan="2">الإجمالي</td>
+<td>${totalOpening.toFixed(2)}</td>
+<td>${totalInvoices.toFixed(2)}</td>
+<td>${totalPaid.toFixed(2)}</td>
+<td>${totalRemain.toFixed(2)}</td>
+</tr>
+</tfoot>
+
+</table>
+
+<script>
+window.print();
+</script>
+
+</body>
+</html>
+`);
+
+  w.document.close();
+}
 
   const selectedCustomer = useMemo(() => {
     if (!custId) return null;
@@ -1141,6 +1270,13 @@ const [debtSearch, setDebtSearch] = useState("");
       >
         {debtsLoading ? "جاري التحميل..." : "تحديث"}
       </button>
+      <button
+  className="btn btn-outline"
+  onClick={printCustomerDebts}
+  disabled={!customerDebts.length}
+>
+  طباعة
+</button>
 
       <input
         className="input"
