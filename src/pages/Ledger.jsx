@@ -1308,10 +1308,10 @@ window.print();
           .map((c,i)=>(
             <tr key={c.id}>
               <td>{i+1}</td>
-              <td>{c.name}</td>
-              <td>{money(c.opening)}</td>
-              <td>{money(c.invoices)}</td>
-              <td>{money(c.payments)}</td>
+              <td>{c.customer_name}</td>
+              <td>{money(c.opening_balance)}</td>
+              <td>{money(c.invoice_total)}</td>
+              <td>{money(c.paid_total)}</td>
               <td>
                 <b style={{color:"red"}}>
                   {money(c.balance)}
