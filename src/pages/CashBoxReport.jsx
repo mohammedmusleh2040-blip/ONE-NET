@@ -18,6 +18,7 @@ export default function CashBoxReport() {
     const { data: payRows = [] } = await supabase
       .from("payments")
       .select("*")
+      .neq("method", "from_balance")
       .gte("pay_date", fromDate)
       .lte("pay_date", toDate);
 
