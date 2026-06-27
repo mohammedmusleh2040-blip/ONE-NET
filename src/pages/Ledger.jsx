@@ -634,24 +634,24 @@ const [debtSearch, setDebtSearch] = useState("");
   }
 
   const totalOpening = customerDebts.reduce(
-    (s, r) => s + Number(r.opening_balance || 0),
-    0
-  );
+  (s, r) => s + Number(r.opening || 0),
+  0
+);
 
-  const totalInvoices = customerDebts.reduce(
-    (s, r) => s + Number(r.invoice_total || 0),
-    0
-  );
+const totalInvoices = customerDebts.reduce(
+  (s, r) => s + Number(r.invoices || 0),
+  0
+);
 
-  const totalPaid = customerDebts.reduce(
-    (s, r) => s + Number(r.paid_total || 0),
-    0
-  );
+const totalPaid = customerDebts.reduce(
+  (s, r) => s + Number(r.payments || 0),
+  0
+);
 
-  const totalRemain = customerDebts.reduce(
-    (s, r) => s + Number(r.remaining || 0),
-    0
-  );
+const totalRemain = customerDebts.reduce(
+  (s, r) => s + Number(r.balance || 0),
+  0
+);
 
     console.log(customerDebts);
     const rows = customerDebts
