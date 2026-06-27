@@ -653,7 +653,8 @@ const [debtSearch, setDebtSearch] = useState("");
     0
   );
 
-  const rows = customerDebts
+    console.log(customerDebts);
+    const rows = customerDebts
     .map(
       (r, i) => `
 <tr>
