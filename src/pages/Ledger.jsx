@@ -620,9 +620,9 @@ const [debtSearch, setDebtSearch] = useState("");
     setCustomerDebts(rows);
 
   } catch(err){
-    console.error(err);
-    alert(err.message);
-  } finally{
+    console.error("Customer Debts Error:", err);
+    alert(JSON.stringify(err, null, 2));
+} finally{
     setDebtsLoading(false);
   }
 }
