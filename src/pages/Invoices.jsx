@@ -149,8 +149,8 @@ export default function Invoices() {
 
   // Search in list
   const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [invScope, setInvScope] = useState("all"); // all | seller | admin
-  const [paymentFilter, setPaymentFilter] = useState("all"); // all | paid | partial | unpaid | refund
+  const [invScope, setInvScope] = useState("all"); 
+  const [paymentFilter, setPaymentFilter] = useState("all"); 
 
   // Pay modal
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -1265,7 +1265,9 @@ export default function Invoices() {
 
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
-                  <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>العائد المالي</th><th>إجراء</th></tr></thead>
+                  <thead>
+                    <tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>العائد المالي</th><th>إجراء</th></tr>
+                  </thead>
                   <tbody>
                     {lines.length === 0 ? (
                       <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>لا توجد بنود مضافة</td></tr>
@@ -1361,7 +1363,9 @@ export default function Invoices() {
                         <td>{money(inv.paid_amount)}</td>
                         <td>{money(inv.remaining_amount)}</td>
                         <td>
-                          <span style={st.key === "paid" ? styles.badgePaid : st.key === "partial" ? styles.badgePartial : st.key === "void" ? styles.badgeVoid : styles.badgeRefund : styles.badgeUnpaid}>{st.ar}</span>
+                          <span style={st.key === "paid" ? styles.badgePaid : st.key === "partial" ? styles.badgePartial : st.key === "void" ? styles.badgeVoid : st.key === "refund" ? styles.badgeRefund : styles.badgeUnpaid}>
+                            {st.ar}
+                          </span>
                         </td>
                         <td>
                           <div style={{ display: "flex", gap: 6 }}>
@@ -1435,7 +1439,7 @@ const styles = {
   tab: { padding: "10px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text)", cursor: "pointer" },
   tabActive: { padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(54, 208, 170, 0.5)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", cursor: "pointer" },
   card: { padding: 16, borderRadius: 18, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" },
-  editBar: { marginBottom: 12, padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255, 200, 70, 0.35)", background: "rgba(255, 200, 70, 0.10)", display: "flex", justifycontent: "space-between", alignitems: "center", width: "100%" },
+  editBar: { marginBottom: 12, padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255, 200, 70, 0.35)", background: "rgba(255, 200, 70, 0.10)", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" },
   payHint: { marginTop: 10, marginBottom: 10, padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12 },
   subTitle: { fontSize: 14, fontWeight: "bold", margin: "12px 0" },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
@@ -1443,7 +1447,7 @@ const styles = {
   grid4: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 12 },
   grid4b: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 },
   label: { display: "flex", flexDirection: "column", gap: 6, fontSize: 12 },
-  input: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "rgba(0,0,0,0.20)", color: "var(--text)", outline: "none" },
+  input: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "rgba(0,0,0,0.20)", color: "var(--text)", outline: "none", width: "100%" },
   btn: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text)", cursor: "pointer" },
   btnPrimary: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(54, 208, 170, 0.5)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", cursor: "pointer" },
   btnDanger: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255, 90, 90, 0.5)", background: "rgba(255, 90, 90, 0.18)", color: "var(--text)", cursor: "pointer" },
@@ -1451,9 +1455,9 @@ const styles = {
   btnWarn: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255, 200, 70, 0.5)", background: "rgba(255, 200, 70, 0.14)", color: "var(--text)", cursor: "pointer" },
   tableWrap: { marginTop: 12, overflowX: "auto", overflowY: "auto", maxHeight: 360, borderRadius: 14, border: "1px solid var(--border)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
-  infoBar: { marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", display: "flex", justifycontent: "space-between" },
-  infoBox: { display: "flex", alignitems: "center", justifycontent: "center", padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12, fontSize: 13 },
-  summaryRow: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, justifycontent: "end" },
+  infoBar: { marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", display: "flex", justifyContent: "space-between" },
+  infoBox: { display: "flex", alignItems: "center", justifyContent: "center", padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12, fontSize: 13 },
+  summaryRow: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, justifyContent: "end" },
   sumChip: { padding: "10px 12px", borderRadius: 999, border: "1px solid var(--border)", background: "var(--panel)", fontSize: 13 },
   badgePaid: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(54, 208, 170, 0.55)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", fontSize: 12 },
   badgePartial: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(255, 200, 70, 0.55)", background: "rgba(255, 200, 70, 0.18)", color: "var(--text)", fontSize: 12 },
@@ -1461,6 +1465,6 @@ const styles = {
   badgeVoid: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(200, 200, 200, 0.55)", background: "rgba(200, 200, 200, 0.18)", color: "var(--text)", fontSize: 12 },
   badgeSeller: { display: "inline-block", padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(30, 200, 120, 0.45)", background: "rgba(30, 200, 120, 0.16)", color: "var(--text)", fontSize: 12 },
   badgeAdmin: { display: "inline-block", padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(120, 120, 120, 0.35)", background: "rgba(120, 120, 120, 0.12)", color: "var(--text)", fontSize: 12 },
-  modalBack: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignitems: "center", justifycontent: "center", zIndex: 9999 },
-  modal: { width: "min(520px, 92vw)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 18, padding: 16, color: "var(--text)" },
+  modalBack: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 },
+  modal: { width: "min(500px, 92vw)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 18, padding: 16, color: "var(--text)" },
 };
