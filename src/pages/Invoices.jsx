@@ -17,13 +17,10 @@ function calcCustomerDebt(openingDebt, invoicesRemaining, unlinkedPayments) {
   const opening = Number(openingDebt || 0);
   const invRem = Number(invoicesRemaining || 0);
 
-  // خصم الدفعة العامة من الدين الافتتاحي أولاً
   const openingAfter = Math.max(0, opening - pay);
   pay = Math.max(0, pay - opening);
 
-  // لو بقي من الدفعة شيء، يخصم من فواتير المتبقي
   const invoicesAfter = Math.max(0, invRem - pay);
-
   return openingAfter + invoicesAfter;
 }
 
@@ -31,7 +28,6 @@ function asPaidStatus(remaining) {
   return safeNum(remaining) <= 0 ? "paid" : "unpaid";
 }
 
-// حالة عربية + جزئية (للواجهة فقط)
 function statusUi(inv) {
   const note = String(inv?.note || "");
   if (note.includes("[VOID]")) return { key: "void", ar: "ملغاة" };
@@ -40,7 +36,7 @@ function statusUi(inv) {
   const paid = safeNum(inv.paid_amount);
   const rem = safeNum(inv.remaining_amount);
   if (rem <= 0) return { key: "paid", ar: "مدفوعة" };
-  if (paid > 0 && rem > 0) return { key: "partial", ar: "جزئية" };
+  if (paid > 0 && rem > 0) return { key: "partial", ar: "مدفوعة جزئياً" };
   return { key: "unpaid", ar: "غير مدفوعة" };
 }
 
@@ -66,6 +62,7 @@ export default function Invoices() {
 
   const [tab, setTab] = useState("create"); 
   const [loading, setLoading] = useState(false);
+  const [networkSettings, setNetworkSettings] = useState({ name: "شبكة ون نت اللاسلكية", phone: "", address: "", logo: "" });
 
   // ===== Toast =====
   const [toast, setToast] = useState({ open: false, text: "", type: "ok" }); 
@@ -152,8 +149,8 @@ export default function Invoices() {
 
   // Search in list
   const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [invScope, setInvScope] = useState(() => (isSeller ? "seller" : "all"));
-  const [paymentFilter, setPaymentFilter] = useState("all");
+  const [invScope, setInvScope] = useState("all"); // all | seller | admin
+  const [paymentFilter, setPaymentFilter] = useState("all"); // all | paid | partial | unpaid | refund
 
   // Pay modal
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -218,11 +215,27 @@ export default function Invoices() {
   }, [selectedCustomer, invoices, unlinkedPaymentsByCustomer]);
 
   // ===== Loaders =====
+  async function loadSettings() {
+    try {
+      const { data } = await supabase.from("settings").select("*").limit(1).maybeSingle();
+      if (data) {
+        setNetworkSettings({
+          name: data.company_name || data.shop_name || data.network_name || "شبكة ون نت اللاسلكية",
+          phone: data.phone || "",
+          address: data.address || "",
+          logo: data.logo_base64 || data.logo_url || ""
+        });
+      }
+    } catch (e) {
+      console.error("فشل جلب إعدادات الشبكة", e);
+    }
+  }
+
   async function loadCustomers() {
     const { data, error } = await supabase
       .from("customers")
-      .select("id,name,type,phone,address,notes,opening_balance,price_per_gb,last_reading_gb,discount_percent,created_at")
-      .order("id", { ascending: true });
+      .select("id,name,type,opening_balance,phone,address,notes,created_at,price_per_gb,last_reading_gb,discount_percent")
+      .order("name", { ascending: true });
     if (error) throw error;
     setCustomers(data || []);
     return data || [];
@@ -256,34 +269,31 @@ export default function Invoices() {
 
       const { data, error } = await q;
       if (error) {
-        console.error("loadCardBalances(seller)", error);
         setCards([]);
         return;
       }
-      const mapped = (data || []).map((r) => ({
+      setCards((data || []).map((r) => ({
         card_type_id: r.card_type_id,
         name: r.card_name,
         price: Number(r.price || 0),
         quantity: Number(r.balance || 0),
-      }));
-      setCards(mapped);
+      })));
       return;
     }
 
     const { data: balances, error } = await supabase.from("v_card_balances").select("card_type_id, balance");
-    if (error) return console.error("loadCardBalances(admin)", error);
+    if (error) return;
 
     const balMap = new Map((balances || []).map((r) => [r.card_type_id, Number(r.balance || 0)]));
     const { data: types, error: typeErr } = await supabase.from("card_types").select("id,name,price").order("price", { ascending: true });
-    if (typeErr) return console.error("loadCardTypes", typeErr);
+    if (typeErr) return;
 
-    const merged = (types || []).map((t) => ({
+    setCards((types || []).map((t) => ({
       card_type_id: t.id,
       name: t.name,
       price: Number(t.price || 0),
       quantity: Number(balMap.get(t.id) || 0),
-    }));
-    setCards(merged);
+    })));
   }
 
   async function loadVendorStock() {
@@ -303,25 +313,15 @@ export default function Invoices() {
   }
 
   async function rpcVendorMove({ card_type_id, qty, noteText, movement_type, ref_id, invoice_id, movement_date }) {
-    const refIdNumRaw = Number(ref_id);
-    const refIdNumFromText = Number(String(ref_id || '').match(/(\d+)/)?.[1]);
-    const refIdNum = Number.isFinite(refIdNumRaw) ? refIdNumRaw : refIdNumFromText;
+    const refIdNum = Number(ref_id) || Number(String(ref_id || '').match(/(\d+)/)?.[1]);
+    const invIdNum = Number(invoice_id) || Number(String(invoice_id || '').match(/(\d+)/)?.[1]) || refIdNum;
 
-    const invIdNumRaw = Number(invoice_id);
-    const invIdNumFromText = Number(String(invoice_id || '').match(/(\d+)/)?.[1]);
-    const invIdNum = Number.isFinite(invIdNumRaw) ? invIdNumRaw : (Number.isFinite(invIdNumFromText) ? invIdNumFromText : refIdNum);
-
-    if (!Number.isFinite(refIdNum)) return { ok: false, skipped: true, reason: 'missing_ref_id' };
-
-    const cardTypeNum = Number(card_type_id);
-    const qtyNum = Number(qty || 0);
-    if (!Number.isFinite(cardTypeNum) || cardTypeNum <= 0) return { ok: false, skipped: true, reason: 'missing_card_type' };
-    if (!Number.isFinite(qtyNum) || qtyNum <= 0) return { ok: false, skipped: true, reason: 'zero_qty' };
+    if (!Number.isFinite(refIdNum)) return { ok: false, skipped: true };
 
     const payload = {
-      p_card_type_id: cardTypeNum,
+      p_card_type_id: Number(card_type_id),
       p_movement_type: String(movement_type || 'OUT').toUpperCase(),
-      p_qty: qtyNum,
+      p_qty: Number(qty || 0),
       p_note: noteText || null,
       p_ref_type: 'invoice',
       p_ref_id: refIdNum,
@@ -330,7 +330,7 @@ export default function Invoices() {
     };
 
     try {
-      const { data: existing, error: exErr } = await supabase
+      const { data: existing } = await supabase
         .from('card_movements')
         .select('id')
         .eq('ref_type', 'invoice')
@@ -338,69 +338,31 @@ export default function Invoices() {
         .eq('movement_type', payload.p_movement_type)
         .maybeSingle();
 
-      if (!exErr && existing?.id) {
-        const { error: upErr } = await supabase
-          .from('card_movements')
-          .update({
-            card_type_id: payload.p_card_type_id,
-            qty: payload.p_qty,
-            note: payload.p_note,
-            invoice_id: payload.p_invoice_id,
-            movement_date: payload.p_movement_date,
-          })
-          .eq('id', existing.id);
-        if (!upErr) return { ok: true, updated: true, id: existing.id };
+      if (existing?.id) {
+        await supabase.from('card_movements').update({ card_type_id: payload.p_card_type_id, qty: payload.p_qty, note: payload.p_note, invoice_id: payload.p_invoice_id, movement_date: payload.p_movement_date }).eq('id', existing.id);
+        return { ok: true };
       }
 
-      const res = await supabase.rpc('vendor_stock_move_v2', payload);
-      if (res?.error) throw res.error;
-      return { ok: true, data: res.data };
+      await supabase.rpc('vendor_stock_move_v2', payload);
+      return { ok: true };
     } catch (e) {
-      console.warn('vendor_stock_move_v2 call skipped:', e);
-      return { ok: false, skipped: true, reason: 'not_available' };
+      return { ok: false, skipped: true };
     }
-  }
-
-  function sumQtyByCardType(invLines) {
-    const totals = new Map();
-    (invLines || []).forEach((l) => {
-      const ct = Number(l?.card_type_id ?? l?.cardTypeId);
-      const q = Number(l?.qty ?? l?.quantity ?? 0);
-      if (!ct || !q) return;
-      totals.set(ct, (totals.get(ct) || 0) + q);
-    });
-    return totals;
   }
 
   async function applyVendorOutByLines(invNumberOrId, invDateStr, invLines, sellerId) {
     if (!sellerId) return;
-    const totals = sumQtyByCardType(invLines);
+    const totals = lines.reduce((m, l) => m.set(Number(l.card_type_id), (m.get(Number(l.card_type_id)) || 0) + safeNum(l.qty)), new Map());
     for (const [cardTypeId, totalQty] of totals.entries()) {
-      await rpcVendorMove({
-        card_type_id: cardTypeId,
-        qty: totalQty,
-        noteText: 'invoice movement',
-        movement_type: 'OUT',
-        ref_id: invNumberOrId,
-        invoice_id: invNumberOrId,
-        movement_date: invDateStr,
-      });
+      await rpcVendorMove({ card_type_id: cardTypeId, qty: totalQty, noteText: 'invoice movement', movement_type: 'OUT', ref_id: invNumberOrId, invoice_id: invNumberOrId, movement_date: invDateStr });
     }
   }
 
   async function applyVendorInByLines(invNumberOrId, invDateStr, invLines, sellerId, reasonTag) {
     if (!sellerId) return;
-    const totals = sumQtyByCardType(invLines);
+    const totals = lines.reduce((m, l) => m.set(Number(l.card_type_id), (m.get(Number(l.card_type_id)) || 0) + safeNum(l.qty)), new Map());
     for (const [cardTypeId, totalQty] of totals.entries()) {
-      await rpcVendorMove({
-        card_type_id: cardTypeId,
-        qty: totalQty,
-        noteText: reasonTag || 'رجوع',
-        movement_type: 'IN',
-        ref_id: invNumberOrId,
-        invoice_id: invNumberOrId,
-        movement_date: invDateStr,
-      });
+      await rpcVendorMove({ card_type_id: cardTypeId, qty: totalQty, noteText: reasonTag || 'رجوع', movement_type: 'IN', ref_id: invNumberOrId, invoice_id: invNumberOrId, movement_date: invDateStr });
     }
   }
 
@@ -408,9 +370,9 @@ export default function Invoices() {
     let q = supabase.from("v_invoices").select("*").order("id", { ascending: false });
     if (isSeller && user?.id) q = q.eq("seller_user_id", user.id);
 
-    const { data: vData, error: vErr } = await q;
-    if (!vErr && vData) {
-      const norm = (vData || []).map((r) => ({
+    const { data: vData } = await q;
+    if (vData) {
+      setInvoices((vData || []).map((r) => ({
         ...r,
         total_before_discount: r.total_before_discount ?? 0,
         discount_percent: r.discount_percent ?? 0,
@@ -418,17 +380,14 @@ export default function Invoices() {
         total_after_discount: r.total_after_discount ?? 0,
         paid_amount: r.paid_amount ?? 0,
         remaining_amount: r.remaining_amount ?? 0,
-      }));
-      setInvoices(norm);
+      })));
       return;
     }
 
     let q2 = supabase.from("invoices").select("*").order("id", { ascending: false });
     if (isSeller && user?.id) q2 = q2.eq("seller_user_id", user.id);
 
-    const { data, error } = await q2;
-    if (error) throw error;
-
+    const { data } = await q2;
     const cm = new Map((customersList || []).map((c) => [c.id, c.name]));
     setInvoices((data || []).map((x) => ({ ...x, customer_name: cm.get(x.customer_id) || "" })));
   }
@@ -440,13 +399,12 @@ export default function Invoices() {
       const fromDate = cashierFrom || todayISO();
       const toDate = cashierTo || fromDate;
 
-      const { data: invRows, error: invErr } = await supabase
+      const { data: invRows } = await supabase
         .from("invoices")
         .select("id,total_after_discount,paid_amount,remaining_amount,invoice_date")
         .eq("seller_user_id", user.id)
         .gte("invoice_date", fromDate)
         .lte("invoice_date", toDate);
-      if (invErr) throw invErr;
 
       const invs = invRows || [];
       const invoicesCount = invs.length;
@@ -456,17 +414,15 @@ export default function Invoices() {
 
       let paymentsInTotal = 0;
       let paymentsOutTotal = 0;
-      const payFromTs = `${fromDate}T00:00:00.000Z`;
-      const payToTs = `${toDate}T23:59:59.999Z`;
 
-      const { data: payRows, error: payErr } = await supabase
+      const { data: payRows } = await supabase
         .from("payments")
-        .select("amount,pay_date,seller_user_id")
+        .select("amount")
         .eq("seller_user_id", user.id)
-        .gte("pay_date", payFromTs)
-        .lte("pay_date", payToTs);
+        .gte("pay_date", fromDate)
+        .lte("pay_date", toDate);
 
-      if (!payErr && payRows) {
+      if (payRows) {
         for (const p of payRows) {
           const a = safeNum(p.amount);
           if (a >= 0) paymentsInTotal += a;
@@ -474,17 +430,9 @@ export default function Invoices() {
         }
       }
 
-      const collectedTotal = invoicesCollectedTotal + paymentsInTotal - paymentsOutTotal;
-
       setCashierSummary({
-        invoicesCount,
-        salesTotal,
-        invoicesCollectedTotal,
-        invoicesRemainingTotal,
-        paymentsInTotal,
-        paymentsOutTotal,
-        collectedTotal,
-        remainingTotal: invoicesRemainingTotal,
+        invoicesCount, salesTotal, invoicesCollectedTotal, invoicesRemainingTotal, paymentsInTotal, paymentsOutTotal,
+        collectedTotal: invoicesCollectedTotal + paymentsInTotal - paymentsOutTotal, remainingTotal: invoicesRemainingTotal,
       });
     } catch (e) {
       console.error(e);
@@ -505,6 +453,7 @@ export default function Invoices() {
     (async () => {
       try {
         setLoading(true);
+        await loadSettings();
         const cs = await loadCustomers();
         await loadUnlinkedPayments();
         await loadCardBalances();
@@ -605,14 +554,10 @@ export default function Invoices() {
   }
 
   async function rpcCardMove({ card_type_id, movement_type, qty, noteText, movement_date }) {
-    const { data, error } = await supabase.rpc("apply_card_movement", {
-      p_card_type_id: Number(card_type_id),
-      p_movement_type: String(movement_type).toUpperCase(),
-      p_qty: Number(qty),
-      p_note: noteText || null,
+    const { data } = await supabase.rpc("apply_card_movement", {
+      p_card_type_id: Number(card_type_id), p_movement_type: String(movement_type).toUpperCase(), p_qty: Number(qty), p_note: noteText || null,
       ...(movement_date ? { p_movement_date: String(movement_date) } : {}),
     });
-    if (error && error?.status !== 409) throw error;
     return data;
   }
 
@@ -621,13 +566,7 @@ export default function Invoices() {
       const ctId = l.card_type_id;
       const qty = safeNum(l.qty);
       if (!ctId || qty <= 0) continue;
-      await rpcCardMove({
-        card_type_id: ctId,
-        movement_type: "IN",
-        qty,
-        noteText: `${reasonTag} فاتورة ${invNumberOrId}`,
-        movement_date: invDateStr || null,
-      });
+      await rpcCardMove({ card_type_id: ctId, movement_type: "IN", qty, noteText: `${reasonTag} فاتورة ${invNumberOrId}`, movement_date: invDateStr || null });
     }
   }
 
@@ -635,44 +574,48 @@ export default function Invoices() {
     const invType = String(inv.invoice_type || "").toLowerCase();
     const isCards = invType === "cards";
     const dateStr = inv.invoice_date || "";
-    const noteStr = String(inv.note || "");
 
     const headCols = isCards
       ? `<tr><th>#</th><th>البند</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr>`
       : `<tr><th>#</th><th>قراءة سابقة</th><th>قراءة حالية</th><th>استهلاك</th><th>سعر الجيجا</th><th>الإجمالي</th></tr>`;
 
     const rows = isCards
-      ? (invLines || []).map((x, i) => {
-            const name = x.card_name ?? x.name ?? "";
-            const qty = safeNum(x.qty);
-            const price = safeNum(x.price);
-            return `<tr><td>${i + 1}</td><td>${name}</td><td>${qty}</td><td>${money(price)}</td><td>${money(qty * price)}</td></tr>`;
-          }).join("")
-      : (invLines || []).map((x, i) => {
-            const prev = safeNum(x.prev_reading_gb ?? 0);
-            const curr = safeNum(x.curr_reading_gb ?? 0);
-            return `<tr><td>${i + 1}</td><td>${prev}</td><td>${curr}</td><td>${safeNum(curr - prev)}</td><td>${money(x.price_per_gb)}</td><td>${money(x.line_total)}</td></tr>`;
-          }).join("");
+      ? (invLines || []).map((x, i) => `<tr><td>${i + 1}</td><td>${x.card_name ?? x.name ?? ""}</td><td>${safeNum(x.qty)}</td><td>${money(x.price)}</td><td>${money(safeNum(x.qty) * safeNum(x.price))}</td></tr>`).join("")
+      : (invLines || []).map((x, i) => `<tr><td>${i + 1}</td><td>${safeNum(x.prev_reading_gb)}</td><td>${safeNum(x.curr_reading_gb)}</td><td>${safeNum(x.curr_reading_gb - x.prev_reading_gb)}</td><td>${money(x.price_per_gb)}</td><td>${money(x.line_total)}</td></tr>`).join("");
 
     return `
     <html lang="ar" dir="rtl">
       <head>
         <meta charset="UTF-8" />
-        <title>فاتورة صادرة</title>
+        <title>فاتورة عميل</title>
         <style>
           body{font-family:Arial, sans-serif; margin:24px; color:#111;}
+          .header-table{width:100%; border:none; margin-bottom:20px;}
+          .logo-area{text-align:left; vertical-align:top;}
+          .logo-img{height:65px; object-fit:contain;}
           .top{display:flex; gap:14px; align-items:stretch;}
           .box{flex:1; border:1px solid #ddd; border-radius:12px; padding:14px;}
-          h1{margin:0 0 10px 0; font-size:18px;}
+          h1{margin:0 0 10px 0; font-size:18px; color:#2b6cb0;}
           table{width:100%; border-collapse:collapse; margin-top:16px;}
           th,td{border:1px solid #ddd; padding:10px; font-size:13px; text-align:right;}
-          th{background:#f5f5f5;}
+          th{background:#f4f6fb;}
           .sum{margin-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:10px;}
           .row{display:flex; justify-content:space-between; padding:10px; border:1px solid #eee; border-radius:10px;}
-          .badge{display:inline-block; padding:4px 10px; border-radius:999px; background:#eef6ff; border:1px solid #cfe3ff;}
         </style>
       </head>
       <body>
+        <table class="header-table">
+          <tr>
+            <td>
+              <h2 style="margin:0; color:#2b6cb0;">${networkSettings.name}</h2>
+              <div style="font-size:12px; color:#555; margin-top:4px;">هاتف: ${networkSettings.phone} | العنوان: ${networkSettings.address}</div>
+            </td>
+            <td class="logo-area">
+              ${networkSettings.logo ? `<img src="${networkSettings.logo}" class="logo-img" />` : ""}
+            </td>
+          </tr>
+        </table>
+        <hr style="border:none; border-top:1px solid #ddd; margin-bottom:15px;"/>
         <div class="top">
           <div class="box">
             <h1>بيانات الفاتورة</h1>
@@ -682,7 +625,7 @@ export default function Invoices() {
           <div class="box">
             <h1>بيانات العميل</h1>
             <div>الاسم: <b>${customerName || "-"}</b></div>
-            <div>صافي الدين: <b>${money(customerDebtValue)}</b></div>
+            <div>دين العميل: <b>${money(customerDebtValue)}</b></div>
           </div>
         </div>
         <table><thead>${headCols}</thead><tbody>${rows}</tbody></table>
@@ -795,6 +738,7 @@ export default function Invoices() {
         await supabase.from("payments").insert([{
           customer_id: invRow.customer_id, invoice_id: null, pay_date: todayISO(), amount: refundCash, payment_type: "other", method: "cash", reference: `REFUND-${refundNo}`,
           note: `[REFUND_CASH_OUT] Refund ${refundNo} for ${invRow.number || invRow.id}`,
+          created_at: `${todayISO()}T12:00:00.000+03:00`,
         }]);
       }
 
@@ -874,14 +818,13 @@ export default function Invoices() {
     }
   }
 
-  // 🔥 إصلاح ثغرة السند التلقائي وحمايتها بـ Try-Catch صريح مع المنطقة الزمنية للسعودية (+03:00)
   async function saveInvoice() {
     try {
       if (saving) return;
       if (!customerId) return showToast("اختر العميل أولاً", "warn");
 
       if (invoiceType === "cards") {
-        if (lines.length === 0) return showToast("أضف بند واحد على الأثل", "warn");
+        if (lines.length === 0) return showToast("أضف بند واحد على الأقل", "warn");
       } else {
         if (safeNum(currReading) - safeNum(prevReading) <= 0) return showToast("القراءة الحالية يجب أن تكون أكبر من السابقة", "warn");
       }
@@ -902,7 +845,7 @@ export default function Invoices() {
 
       const invRow = {
         client_uid: uid, customer_id: Number(customerId), invoice_type: invoiceType,
-        invoice_datetime: `${invoiceDate}:00.000+03:00`, // إجبار صياغة الوقت والمنطقة الزمنية للمملكة
+        invoice_datetime: `${invoiceDate}:00.000+03:00`, 
         invoice_date: invoiceDate.slice(0, 10), seller_user_id: posMode ? (user?.id || null) : null,
         total_before_discount: subtotal, discount_percent: safeNum(discountPercent), discount_value: discountValue,
         total_after_discount: totalAfterDiscount, paid_amount: paid, remaining_amount: remaining,
@@ -970,10 +913,9 @@ export default function Invoices() {
         await supabase.from("customers").update({ last_reading_gb: safeNum(currReading) }).eq("id", Number(customerId));
       }
 
-      // 🔥 الحماية الصارمة والمستقلة لإنشاء السند المالي التلقائي التابع للفاتورة الكاش
       if (paid > 0) {
         try {
-          const { error: payInsertErr } = await supabase.from("payments").insert({
+          await supabase.from("payments").insert({
             customer_id: Number(customerId),
             invoice_id: invoiceId,
             pay_date: invoiceDate.slice(0, 10),
@@ -982,12 +924,11 @@ export default function Invoices() {
             method: "cash",
             reference: null,
             note: `سند تلقائي صادر ومضمون من الفاتورة ${invNumber}`,
-            created_at: `${invoiceDate.slice(0, 10)}T${invoiceDate.slice(11, 16)}:00.000+03:00`, // تطابق أوقات المبيعات مع السندات بالـ Timezone
+            created_at: `${invoiceDate.slice(0, 10)}T${invoiceDate.slice(11, 16)}:00.000+03:00`, 
             seller_user_id: user?.id || null
           });
-          if (payInsertErr) console.error("حماية المزامنة المالية - فشل إنشاء السند صامتاً:", payInsertErr);
         } catch (payCatch) {
-          console.error("حماية المزامنة المالية - خطأ غير متوقع:", payCatch);
+          console.error("فشل إنشاء السند صامتاً:", payCatch);
         }
       }
 
@@ -1000,7 +941,7 @@ export default function Invoices() {
     } catch (e) {
       console.error(e);
       showToast(e?.message || "فشل حفظ الفاتورة", "err");
-    } {
+    } finally {
       setLoading(false);
       setSaving(false);
     }
@@ -1076,22 +1017,80 @@ export default function Invoices() {
     }
   }
 
+  function clearFilters() {
+    setInvoiceSearch("");
+    setInvScope("all");
+    setPaymentFilter("all");
+    showToast("تم تفريغ فلاتر البحث", "ok");
+  }
+
   function printFilteredInvoices() {
     const w = window.open("", "_blank");
     const rows = filteredInvoices.map(inv => `
       <tr>
-        <td>${inv.number || ""}</td>
-        <td>${inv.customer_name || ""}</td>
+        <td>${inv.number || "-"}</td>
+        <td>${inv.customer_name || "-"}</td>
         <td>${inv.invoice_date || ""}</td>
-        <td>${Number(inv.total_after_discount || 0).toFixed(2)}</td>
-        <td>${Number(inv.paid_amount || 0).toFixed(2)}</td>
-        <td>${Number(inv.remaining_amount || 0).toFixed(2)}</td>
+        <td>${money(inv.total_after_discount)}</td>
+        <td>${money(inv.paid_amount)}</td>
+        <td>${money(inv.remaining_amount)}</td>
+        <td>${statusUi(inv).ar}</td>
       </tr>
     `).join("");
 
+    let filterTitle = "تقرير كل فواتير السجل المستخرجة";
+    if (paymentFilter === "paid") filterTitle = "تقرير الفواتير المدفوعة بالكامل";
+    if (paymentFilter === "partial") filterTitle = "تقرير الفواتير المدفوعة جزئياً";
+    if (paymentFilter === "unpaid") filterTitle = "تقرير الفواتير غير المدفوعة (الآجل القائم)";
+    if (paymentFilter === "refund") filterTitle = "تقرير فواتير المرتجعات المالية";
+
     w.document.write(`
-      <html dir="rtl"><head><title>تقرير الفواتير</title><style>body{font-family:Tahoma;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:6px;text-align:center}th{background:#eee}</style></head>
-      <body><h2>تقرير الفواتير المستخرجة</h2><table><tr><th>رقم الفاتورة</th><th>العميل</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th></tr>${rows}</table><script>window.print();</script></body></html>
+      <html dir="rtl">
+      <head>
+        <title>طباعة السجل المفلتر</title>
+        <style>
+          body{font-family:Tahoma, Arial, sans-serif; padding:20px; color:#111;}
+          .header-print{width:100%; border:none; margin-bottom:20px;}
+          .logo-img{height:60px; object-fit:contain;}
+          h2{margin:0; color:#2b6cb0;}
+          .title-report{text-align:center; font-size:16px; font-weight:bold; margin:20px 0; background:#f4f6fb; padding:8px; border-radius:6px;}
+          table{width:100%; border-collapse:collapse; margin-top:10px;}
+          th,td{border:1px solid #999; padding:8px; text-align:center; font-size:12px;}
+          th{background:#f5f5f5;}
+        </style>
+      </head>
+      <body>
+        <table class="header-print">
+          <tr>
+            <td>
+              <h2>${networkSettings.name}</h2>
+              <div style="font-size:11px; color:#555; margin-top:3px;">هاتف: ${networkSettings.phone} | العنوان: ${networkSettings.address}</div>
+            </td>
+            <td style="text-align:left; vertical-align:top;">
+              ${networkSettings.logo ? `<img src="${networkSettings.logo}" class="logo-img" />` : ""}
+            </td>
+          </tr>
+        </table>
+        <div class="title-report">${filterTitle}</div>
+        <table>
+          <thead>
+            <tr>
+              <th>رقم الفاتورة</th>
+              <th>العميل</th>
+              <th>التاريخ</th>
+              <th>الإجمالي الصافي</th>
+              <th>المدفوع</th>
+              <th>المتبقي</th>
+              <th>حالة الفاتورة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="7">لا توجد بيانات تطابق هذا الفلتر حالياً</td></tr>`}
+          </tbody>
+        </table>
+        <script>window.print();</script>
+      </body>
+      </html>
     `);
     w.document.close();
   }
@@ -1232,98 +1231,151 @@ export default function Invoices() {
           {selectedCustomer && (
             <div style={styles.infoBar}>
               <span>العميل: <b>{selectedCustomer.name}</b></span>
-              <span>صافي الذمة: <b>{money(customerDebt)}</b></span>
+              <span style={{ opacity: 0.75 }}>النوع: <b>{selectedCustomer.type}</b></span>
+              <span>دين العميل: <b>{money(customerDebt)}</b></span>
+              {isGigaCustomer && (
+                <span style={{ opacity: 0.75 }}>سعر الجيجا: <b>{money(selectedCustomer.price_per_gb)}</b> | آخر قراءة: <b>{safeNum(selectedCustomer.last_reading_gb)}</b></span>
+              )}
             </div>
           )}
 
           {invoiceType === "cards" ? (
             <>
-              <div style={styles.subTitle}>بنود الكروت</div>
+              <div style={styles.subTitle}>بنود الكروت (من المخزون النهائي)</div>
               <div style={styles.grid4}>
-                <select value={selCardId} onChange={(e) => setSelCardId(e.target.value)} style={styles.input}>
-                  <option value="">اختر كرت...</option>
-                  {cardsForUi.map((c) => <option key={c.card_type_id} value={c.card_type_id}>{c.name} — السعر: {money(c.price)} — المتاح: {c.quantity}</option>)}
-                </select>
-                <input type="number" value={selQty} onChange={(e) => setSelQty(e.target.value)} style={styles.input} min="1" placeholder="الكمية" />
-                <input type="number" value={selPrice} onChange={(e) => setSelPrice(e.target.value)} style={styles.input} min="0" placeholder="السعر" />
-                <div style={{ display: "flex", gap: 8 }}><button onClick={addLine} style={styles.btn}>+ إضافة</button></div>
+                <label style={styles.label}>نوع الكرت *
+                  <select value={selCardId} onChange={(e) => setSelCardId(e.target.value)} style={styles.input}>
+                    <option value="">اختر كرت...</option>
+                    {cardsForUi.map((c) => (
+                      <option key={c.card_type_id} value={c.card_type_id}>{c.name} — السعر: {money(c.price)} — المتاح: {c.quantity}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ ...styles.label, width: "100%" }}>الكمية
+                  <input type="number" value={selQty} onChange={(e) => setSelQty(e.target.value)} style={styles.input} min="1" />
+                </label>
+                <label style={{ ...styles.label, width: "100%" }}>السعر
+                  <input type="number" value={selPrice} onChange={(e) => setSelPrice(e.target.value)} style={styles.input} min="0" />
+                </label>
+                <div style={{ display: "flex", alignItems: "end", gap: 8 }}>
+                  <button onClick={addLine} style={styles.btn}>+ إضافة بند</button>
+                  <button onClick={() => setLines([])} style={styles.btnGhost}>تفريغ</button>
+                </div>
               </div>
+
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
-                  <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th><th>إجراء</th></tr></thead>
+                  <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>العائد المالي</th><th>إجراء</th></tr></thead>
                   <tbody>
-                    {lines.map((x, i) => (
-                      <tr key={i}><td>{i + 1}</td><td>{x.name}</td><td>{x.qty}</td><td>{money(x.price)}</td><td>{money(x.line_total)}</td><td><button onClick={() => removeLine(i)} style={styles.btnDanger}>حذف</button></td></tr>
-                    ))}
+                    {lines.length === 0 ? (
+                      <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>لا توجد بنود مضافة</td></tr>
+                    ) : (
+                      lines.map((x, i) => (
+                        <tr key={i}><td>{i + 1}</td><td>{x.name}</td><td>{x.qty}</td><td>{money(x.price)}</td><td>{money(x.line_total)}</td><td><button onClick={() => removeLine(i)} style={styles.btnDanger}>حذف</button></td></tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </>
           ) : (
-            <div style={styles.grid4b}>
-              <label style={styles.label}>القراءة السابقة<input type="number" value={prevReading} readOnly style={styles.input} /></label>
-              <label style={styles.label}>القراءة الحالية *<input type="number" value={currReading} onChange={(e) => setCurrReading(e.target.value)} style={styles.input} /></label>
-              <label style={styles.label}>سعر الجيجا<input type="number" value={pricePerGb} readOnly style={styles.input} /></label>
-            </div>
+            <>
+              <div style={styles.subTitle}>فاتورة جيجا (تظهر فقط لعملاء giga)</div>
+              <div style={styles.grid4b}>
+                <label style={styles.label}>القراءة السابقة<input type="number" value={prevReading} readOnly style={{ ...styles.input, opacity: 0.9 }} /></label>
+                <label style={styles.label}>القراءة الحالية *<input type="number" value={currReading} onChange={(e) => setCurrReading(e.target.value)} style={styles.input} /></label>
+                <label style={styles.label}>سعر الجيجا<input type="number" value={pricePerGb} readOnly style={{ ...styles.input, opacity: 0.9 }} /></label>
+                <div style={styles.infoBox}>الاستهلاك المستقطع: <b>{Math.max(0, safeNum(currReading) - safeNum(prevReading))} GB</b></div>
+              </div>
+            </>
           )}
 
-          <div style={styles.grid3} style={{ marginTop: 12 }}>
-            <label style={styles.label}>خصم %<input type="number" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} style={styles.input} /></label>
-            <label style={styles.label}>المدفوع الآن<input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={styles.input} readOnly={editMode} /></label>
-            <label style={styles.label}>ملاحظات الفاتورة<input value={note} onChange={(e) => setNote(e.target.value)} style={styles.input} /></label>
+          <div style={styles.grid3}>
+            <label style={styles.label}>خصم %<input type="number" value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} style={styles.input} min="0" max="100" /></label>
+            <label style={styles.label}>المدفوع الآن<input type="number" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} style={styles.input} min="0" readOnly={editMode} /></label>
+            <label style={styles.label}>ملاحظات وبيان الفاتورة<input value={note} onChange={(e) => setNote(e.target.value)} style={styles.input} placeholder="اختياري..." /></label>
           </div>
 
           <div style={styles.summaryRow}>
-            <div style={styles.sumChip}>الصافي بعد الخصم: <b>{money(totalAfterDiscount)}</b></div>
-            <div style={styles.sumChip}>المتبقي: <b>{money(remaining)}</b></div>
+            <div style={styles.sumChip}>قبل الخصم: <b>{money(subtotal)}</b></div>
+            <div style={styles.sumChip}>قيمة الخصم المستقطع: <b>{money(discountValue)}</b></div>
+            <div style={styles.sumChip}>الإجمالي الصافي: <b>{money(totalAfterDiscount)}</b></div>
+            <div style={styles.sumChip}>المتبقي آجل: <b>{money(remaining)}</b></div>
           </div>
 
           <div style={{ display: "flex", gap: 10, justifyContent: "end", marginTop: 12 }}>
-            <button onClick={() => previewOrPrint("preview")} style={styles.btn}>معاينة</button>
-            <button onClick={saveInvoice} style={styles.btnPrimary}>{editMode ? "حفظ التعديل" : "حفظ الفاتورة"}</button>
+            <button onClick={() => previewOrPrint("preview")} style={styles.btn}>معاينة الفاتورة</button>
+            <button onClick={saveInvoice} style={styles.btnPrimary}>{editMode ? "حفظ التعديل الحسابي" : "حفظ واعتماد الفاتورة"}</button>
           </div>
         </div>
       )}
 
       {tab === "list" && (
         <div style={styles.card}>
-          <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} style={styles.input}>
-              <option value="all">كل الحالات</option>
-              <option value="paid">مدفوعة</option>
-              <option value="partial">جزئية</option>
-              <option value="unpaid">غير مدفوعة</option>
+          <div style={styles.subTitle}>سجل الفواتير العام</div>
+          <div style={{ display: "flex", gap: "10px", marginBottom: "15px", flexWrap: "wrap", alignItems: "center" }}>
+            {!isSeller && (
+              <select value={invScope} onChange={(e) => setInvScope(e.target.value)} style={styles.input} style={{ maxWidth: 180 }}>
+                <option value="all">📁 كل جهات الإصدار</option>
+                <option value="seller">فواتير البائع</option>
+                <option value="admin">فواتير الإدارة</option>
+              </select>
+            )}
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} style={styles.input} style={{ maxWidth: 180 }}>
+              <option value="all">🔍 كل حالات السداد</option>
+              <option value="paid">مدفوعة بالكامل</option>
+              <option value="partial">مدفوعة جزئياً</option>
+              <option value="unpaid">غير مدفوعة (آجل قائم)</option>
+              <option value="refund">مرتجعة ماليّاً</option>
             </select>
-            <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="بحث..." style={styles.input} />
-            <button onClick={printFilteredInvoices} style={styles.btn}>🖨️ طباعة القائمة</button>
+            <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="بحث برقم الفاتورة، اسم العميل، البيان..." style={styles.input} style={{ maxWidth: 280 }} />
+            <button onClick={clearFilters} style={styles.btnGhost}>❌ تفريغ فلاتر البحث</button>
+            <button onClick={printFilteredInvoices} style={styles.btnPrimary}>🖨️ طباعة السجل المفلتر</button>
           </div>
+
           <div style={styles.tableWrap}>
             <table style={styles.table}>
               <thead>
-                <tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>التاريخ</th><th>الإجمالي</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th><th>إجراءات</th></tr>
+                <tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>النوع</th><th>التاريخ</th><th>الإجمالي الصافي</th><th>المدفوع</th><th>المتبقي آجل</th><th>الحالة</th><th>إجراءات الإدارة والمطابقة</th></tr>
               </thead>
               <tbody>
-                {filteredInvoices.map((inv) => (
-                  <tr key={inv.id}>
-                    <td>{inv.id}</td>
-                    <td>{inv.number || "-"}</td>
-                    <td>{inv.customer_name}</td>
-                    <td>{inv.invoice_date}</td>
-                    <td>{money(inv.total_after_discount)}</td>
-                    <td>{money(inv.paid_amount)}</td>
-                    <td>{money(inv.remaining_amount)}</td>
-                    <td>{statusUi(inv).ar}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => printSavedInvoice(inv)} style={styles.btn}>طباعة</button>
-                        <button onClick={() => openPay(inv)} style={styles.btnPrimary}>سداد</button>
-                        <button onClick={() => startEdit(inv)} style={styles.btn}>تعديل</button>
-                        <button onClick={() => refundInvoice(inv)} style={styles.btnWarn}>مرتجع</button>
-                        <button onClick={() => deleteInvoice(inv)} style={styles.btnDanger}>حذف</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredInvoices.length === 0 ? (
+                  <tr><td colSpan={10} style={{ textAlign: "center", opacity: 0.7, padding: "15px" }}>لا توجد فواتير تطابق شروط التصفية والبحث حالياً</td></tr>
+                ) : (
+                  filteredInvoices.map((inv) => {
+                    const st = statusUi(inv);
+                    const isClosed = st.key === "void" || st.key === "refund";
+                    return (
+                      <tr key={inv.id}>
+                        <td>{inv.id}</td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span>{inv.number || "-"}</span>
+                            {inv?.seller_user_id ? <span style={styles.badgeSeller}>بائع</span> : <span style={styles.badgeAdmin}>إدارة</span>}
+                          </div>
+                        </td>
+                        <td>{inv.customer_name || "-"}</td>
+                        <td>{String(inv.invoice_type).toLowerCase() === "cards" ? "كروت" : "جيجا"}</td>
+                        <td>{inv.invoice_date}</td>
+                        <td>{money(inv.total_after_discount)}</td>
+                        <td>{money(inv.paid_amount)}</td>
+                        <td>{money(inv.remaining_amount)}</td>
+                        <td>
+                          <span style={st.key === "paid" ? styles.badgePaid : st.key === "partial" ? styles.badgePartial : st.key === "void" ? styles.badgeVoid : styles.badgeRefund : styles.badgeUnpaid}>{st.ar}</span>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => printSavedInvoice(inv)} style={styles.btn}>طباعة</button>
+                            <button onClick={() => openPay(inv)} style={styles.btnPrimary} disabled={isClosed}>سداد</button>
+                            {canEditInvoice && <button onClick={() => startEdit(inv)} style={styles.btn}>تعديل</button>}
+                            {canRefundInvoice && canRefundThis(inv) && <button onClick={() => refundInvoice(inv)} style={styles.btnWarn}>مرتجع</button>}
+                            {canDeleteInvoice && <button onClick={() => deleteInvoice(inv)} style={styles.btnDanger}>حذف</button>}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1332,13 +1384,18 @@ export default function Invoices() {
 
       {tab === "pay" && (
         <div style={styles.card}>
+          <div style={styles.subTitle}>متابعة وسداد فواتير الآجل القائم</div>
           <div style={styles.tableWrap}>
             <table style={styles.table}>
-              <thead><tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>المتبقي</th><th>إجراء</th></tr></thead>
+              <thead><tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>المتبقي للتحصيل</th><th>إجراء فوري</th></tr></thead>
               <tbody>
-                {unpaidInvoices.map((inv) => (
-                  <tr key={inv.id}><td>{inv.id}</td><td>{inv.number || "-"}</td><td>{inv.customer_name}</td><td>{money(inv.remaining_amount)}</td><td><button onClick={() => openPay(inv)} style={styles.btnPrimary}>سداد الفاتورة</button></td></tr>
-                ))}
+                {unpaidInvoices.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7, padding: "15px" }}>الحمد لله! لا توجد فواتير معلقة بانتظار السداد حالياً</td></tr>
+                ) : (
+                  unpaidInvoices.map((inv) => (
+                    <tr key={inv.id}><td>{inv.id}</td><td>{inv.number || "-"}</td><td>{inv.customer_name}</td><td><b style={{ color: "red" }}>{money(inv.remaining_amount)}</b></td><td><button onClick={() => openPay(inv)} style={styles.btnPrimary}>تسجيل سند سداد</button></td></tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1348,19 +1405,20 @@ export default function Invoices() {
       {payModalOpen && (
         <div style={styles.modalBack}>
           <div style={styles.modal}>
-            <h3>سداد فاتورة #{payInvoice?.number || payInvoice?.id}</h3>
+            <h3>تسجيل سند سداد للفاتورة #{payInvoice?.number || payInvoice?.id}</h3>
+            <div style={styles.payHint}>المتبقي القائم للفاتورة: <b>{money(payInvoice?.remaining_amount)} ريال</b></div>
             <div style={styles.grid2}>
-              <label style={styles.label}>مبلغ السداد<input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} /></label>
-              <label style={styles.label}>الطريقة
+              <label style={styles.label}>مبلغ التحصيل المستلم<input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} /></label>
+              <label style={styles.label}>طريقة التحصيل
                 <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={styles.input}>
-                  <option value="cash">نقدي</option>
-                  <option value="transfer">تحويل بنكي</option>
-                  <option value="from_balance">خصم من رصيد العميل</option>
+                  <option value="cash">نقدي (كاش الصندوق)</option>
+                  <option value="transfer">تحويل بنكي الكتروني</option>
+                  <option value="from_balance">خصم من رصيد العميل المسبق</option>
                 </select>
               </label>
             </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "end", marginTop: 12 }}>
-              <button onClick={doPay} style={styles.btnPrimary}>تأكيد</button>
+            <div style={{ display: "flex", gap: 10, justifyContent: "end", marginTop: 15 }}>
+              <button onClick={doPay} style={styles.btnPrimary}>تأكيد واعتماد السند المالي</button>
               <button onClick={() => setPayModalOpen(false)} style={styles.btnGhost}>إلغاء</button>
             </div>
           </div>
@@ -1370,20 +1428,22 @@ export default function Invoices() {
   );
 }
 
+// ===== Styles =====
 const styles = {
   headerRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 },
   tabs: { display: "flex", gap: 8, flexWrap: "wrap" },
   tab: { padding: "10px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text)", cursor: "pointer" },
   tabActive: { padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(54, 208, 170, 0.5)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", cursor: "pointer" },
   card: { padding: 16, borderRadius: 18, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" },
-  editBar: { marginBottom: 12, padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255, 200, 70, 0.35)", background: "rgba(255, 200, 70, 0.10)", display: "flex", justifyContent: "space-between", alignItems: "center" },
+  editBar: { marginBottom: 12, padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255, 200, 70, 0.35)", background: "rgba(255, 200, 70, 0.10)", display: "flex", justifycontent: "space-between", alignitems: "center", width: "100%" },
+  payHint: { marginTop: 10, marginBottom: 10, padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12 },
   subTitle: { fontSize: 14, fontWeight: "bold", margin: "12px 0" },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
   grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 },
   grid4: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 12 },
   grid4b: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 },
   label: { display: "flex", flexDirection: "column", gap: 6, fontSize: 12 },
-  input: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "rgba(0,0,0,0.20)", color: "var(--text)", outline: "none", width: "100%" },
+  input: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "rgba(0,0,0,0.20)", color: "var(--text)", outline: "none" },
   btn: { padding: "10px 12px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text)", cursor: "pointer" },
   btnPrimary: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(54, 208, 170, 0.5)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", cursor: "pointer" },
   btnDanger: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255, 90, 90, 0.5)", background: "rgba(255, 90, 90, 0.18)", color: "var(--text)", cursor: "pointer" },
@@ -1391,9 +1451,16 @@ const styles = {
   btnWarn: { padding: "10px 12px", borderRadius: 12, border: "1px solid rgba(255, 200, 70, 0.5)", background: "rgba(255, 200, 70, 0.14)", color: "var(--text)", cursor: "pointer" },
   tableWrap: { marginTop: 12, overflowX: "auto", overflowY: "auto", maxHeight: 360, borderRadius: 14, border: "1px solid var(--border)" },
   table: { width: "100%", borderCollapse: "collapse", minWidth: 900 },
-  infoBar: { marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", display: "flex", justifyContent: "space-between" },
-  summaryRow: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, justifyContent: "end" },
+  infoBar: { marginTop: 10, padding: "10px 12px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", display: "flex", justifycontent: "space-between" },
+  infoBox: { display: "flex", alignitems: "center", justifycontent: "center", padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12, fontSize: 13 },
+  summaryRow: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, justifycontent: "end" },
   sumChip: { padding: "10px 12px", borderRadius: 999, border: "1px solid var(--border)", background: "var(--panel)", fontSize: 13 },
-  modalBack: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 },
-  modal: { width: "min(500px, 90vw)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 18, padding: 16, color: "var(--text)" },
+  badgePaid: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(54, 208, 170, 0.55)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", fontSize: 12 },
+  badgePartial: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(255, 200, 70, 0.55)", background: "rgba(255, 200, 70, 0.18)", color: "var(--text)", fontSize: 12 },
+  badgeUnpaid: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(255, 90, 90, 0.55)", background: "rgba(255, 90, 90, 0.18)", color: "var(--text)", fontSize: 12 },
+  badgeVoid: { display: "inline-block", padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(200, 200, 200, 0.55)", background: "rgba(200, 200, 200, 0.18)", color: "var(--text)", fontSize: 12 },
+  badgeSeller: { display: "inline-block", padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(30, 200, 120, 0.45)", background: "rgba(30, 200, 120, 0.16)", color: "var(--text)", fontSize: 12 },
+  badgeAdmin: { display: "inline-block", padding: "4px 10px", borderRadius: 999, border: "1px solid rgba(120, 120, 120, 0.35)", background: "rgba(120, 120, 120, 0.12)", color: "var(--text)", fontSize: 12 },
+  modalBack: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex", alignitems: "center", justifycontent: "center", zIndex: 9999 },
+  modal: { width: "min(520px, 92vw)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 18, padding: 16, color: "var(--text)" },
 };
