@@ -634,7 +634,7 @@ export default function Invoices() {
           <div class="row"><span>قيمة الخصم</span><b>${money(inv.discount_value)}</b></div>
           <div class="row"><span>الصافي المطلوب</span><b>${money(inv.total_after_discount)}</b></div>
           <div class="row"><span>المدفوع</span><b>${money(inv.paid_amount)}</b></div>
-          <div class="row"><span>المتبقي في الذمة</span><b>${money(inv.remaining_amount)}</b></div>
+          <div class="row"><span>الباقي</span><b>${money(inv.remaining_amount)}</b></div>
         </div>
       </body>
     </html>`;
@@ -1064,7 +1064,7 @@ export default function Invoices() {
           <tr>
             <td>
               <h2>${networkSettings.name}</h2>
-              <div style="font-size:11px; color:#555; margin-top:3px;">هاتف: ${networkSettings.phone} | العنوان: ${networkSettings.address}</div>
+              <div style="font-size:11px; color:#555; margin-top:3px;">هاتف: ${networkSettings.phone} |العنوان: ${networkSettings.address}</div>
             </td>
             <td style="text-align:left; vertical-align:top;">
               ${networkSettings.logo ? `<img src="${networkSettings.logo}" class="logo-img" />` : ""}
@@ -1129,7 +1129,7 @@ export default function Invoices() {
   return (
     <div style={{ padding: 18, direction: "rtl" }}>
       {toast.open && (
-        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 14, border: toast.type === "ok" ? "1px solid rgba(54, 208, 170, 0.55)" : "1px solid rgba(255, 90, 90, 0.55)", background: toast.type === "ok" ? "rgba(54, 208, 170, 0.18)" : "rgba(255, 90, 90, 0.18)", color: "#fff", minWidth: 260, backdropFilter: "blur(10px)" }}>
+        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 14, border: toast.type === "ok" ? "1px solid rgba(54, 208, 170, 0.55)" : "1px solid rgba(255, 90, 90, 0.55)", background: toast.type === "ok" ? "rgba(54, 208, 170, 0.18)" : "rgba(255, 90, 90, 0.18)", color: "#fff", minWidth: 260, maxWidth: 520, backdropFilter: "blur(10px)" }}>
           {toast.text}
         </div>
       )}
@@ -1409,7 +1409,7 @@ export default function Invoices() {
       {payModalOpen && (
         <div style={styles.modalBack}>
           <div style={styles.modal}>
-            <h3>تسجيل سند سداد للفاتورة #{payInvoice?.number || payInvoice?.id}</h3>
+            <h3>سداد فاتورة #{payInvoice?.number || payInvoice?.id}</h3>
             <div style={styles.payHint}>المتبقي القائم للفاتورة: <b>{money(payInvoice?.remaining_amount)} ريال</b></div>
             <div style={styles.grid2}>
               <label style={styles.label}>مبلغ التحصيل المستلم<input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} /></label>
