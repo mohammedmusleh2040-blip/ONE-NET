@@ -32,6 +32,7 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// دالة بناء الرصيد المتصاعد بالأولويات المحاسبية الذكية لمنع السوالب والتداخل
 function buildRunning(rows, opening = 0) {
   const getKindWeight = (r) => {
     if (String(r.kind).includes("فاتورة") && !r.is_detail) return 1; 
@@ -1154,6 +1155,40 @@ export default function Ledger() {
             </>
           )}
 
+          {tab === "customerDebts" && (
+            <>
+              <button className="btn" onClick={loadCustomerDebts} disabled={debtsLoading}>
+                {debtsLoading ? "جاري التحميل..." : "تحديث البيانات"}
+              </button>
+              <button className="btn btn-outline" onClick={exportDebtsToCSV} disabled={!finalFilteredDebts.length}>
+                📊 تصدير Excel
+              </button>
+              <button className="btn btn-outline" onClick={printCustomerDebts} disabled={!finalFilteredDebts.length}>
+                🖨️ طباعة المفلتر
+              </button>
+              
+              <select 
+                className="input" 
+                style={{ maxWidth: 180, border: "1px solid #aaa" }} 
+                value={agingFilter} 
+                onChange={(e) => setAgingFilter(e.target.value)}
+              >
+                <option value="all">📁 كل الحسابات</option>
+                <option value="critical">🔴 ديون حرجة (&gt;15 يوم)</option>
+                <option value="warning">🟡 ديون متوسطة (&gt;5 أيام)</option>
+                <option value="safe">🟢 تمام ومستقر (≤ يومين)</option>
+              </select>
+
+              <input
+                className="input"
+                placeholder="بحث باسم العميل..."
+                value={debtSearch}
+                onChange={(e) => setDebtSearch(e.target.value)}
+                style={{ maxWidth: 220 }}
+              />
+            </>
+          )}
+
           {tab === "giga" && (
             <>
               <select className="input" style={{ minWidth: 220 }} value={gigaCustomerId} onChange={(e) => setGigaCustomerId(e.target.value)}>
@@ -1170,26 +1205,26 @@ export default function Ledger() {
         </div>
       </div>
 
-      {/* =============== حركة الكروت =============== */}
+      {/* =============== حركة الكروت (إعادة بناء وتطوير الواجهة الجمالية) =============== */}
       {tab === "cardMoves" && (
         <>
           <div className="card no-print" style={{ marginBottom: 15, padding: "20px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "15px" }}>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ marginTop: "5px" }} />
               </label>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ marginTop: "5px" }} />
               </label>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>نوع الحركة
-                <select className="input" value={mType} onChange={(e) => setMType(e.target.value)}>
+                <select className="input" value={mType} onChange={(e) => setMType(e.target.value)} style={{ marginTop: "5px" }}>
                   <option value="all">الكل</option>
                   <option value="IN">إدخال (IN)</option>
                   <option value="OUT">إخراج (OUT)</option>
                 </select>
               </label>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>نوع الكرت
-                <select className="input" value={cardTypeId} onChange={(e) => setCardTypeId(e.target.value)}>
+                <select className="input" value={cardTypeId} onChange={(e) => setCardTypeId(e.target.value)} style={{ marginTop: "5px" }}>
                   <option value="all">الكل</option>
                   {(cardTypes || []).map((ct) => (<option key={ct.id} value={ct.id}>{ct.name}</option>))}
                 </select>
@@ -1200,10 +1235,11 @@ export default function Ledger() {
               <label style={{ fontWeight: "bold", fontSize: "13px", flex: "1", minWidth: "280px" }}>بحث متقدم
                 <div style={{ display: "flex", gap: 8, marginTop: "5px" }}>
                   <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث باسم الكرت / رقم الفاتورة / العميل / الملاحظات..." />
-                  <button type="button" className="btn btn-outline" onClick={() => setQ("")}>مسح</button>
+                  <button type="button" className="btn btn-outline" onClick={() => setQ("")} style={{ minHeight: "auto" }}>مسح</button>
                 </div>
               </label>
 
+              {/* بطاقات الملخص المطورة (Mini-Cards) لحل تداخل الأرقام */}
               <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                 <div style={{ background: "#f0fff4", borderRight: "4px solid #38a169", padding: "8px 15px", borderRadius: "4px", minWidth: "100px", textAlign: "center" }}>
                   <div style={{ fontSize: "11px", color: "#666" }}>📥 إجمالي IN</div>
@@ -1219,7 +1255,7 @@ export default function Ledger() {
                 </div>
                 {cardTypeId !== "all" && (
                   <div style={{ background: "#fffaf0", borderRight: "4px solid #dd6b20", padding: "8px 15px", borderRadius: "4px", minWidth: "120px", textAlign: "center" }}>
-                    <div style={{ fontSize: "11px", color: "#666" }}>🏬 الرصيد الحالي</div>
+                    <div style={{ fontSize: "11px", color: "#666" }}>🏬 الرصيد الحالي بالمخزن</div>
                     <div style={{ fontSize: "16px", fontWeight: "bold", color: "#dd6b20" }}>{selectedBalanceNow}</div>
                   </div>
                 )}
@@ -1257,7 +1293,16 @@ export default function Ledger() {
                           <td>{fmtDate(r.created_at)}</td>
                           <td><strong>{r.card_name}</strong></td>
                           <td>
-                            <span className="pill" style={{ background: isIn ? "#f0fff4" : "#fff5f5", color: isIn ? "#38a169" : "#e53e3e", border: isIn ? "1px solid #38a169" : "1px solid #e53e3e", padding: "2px 8px", fontWeight: "bold" }}>
+                            <span 
+                              className="pill" 
+                              style={{ 
+                                background: isIn ? "#f0fff4" : "#fff5f5", 
+                                color: isIn ? "#38a169" : "#e53e3e", 
+                                border: isIn ? "1px solid #38a169" : "1px solid #e53e3e",
+                                padding: "2px 8px",
+                                fontWeight: "bold"
+                              }}
+                            >
                               {isIn ? "IN" : "OUT"}
                             </span>
                           </td>
@@ -1280,23 +1325,23 @@ export default function Ledger() {
         </>
       )}
 
-      {/* =============== حركة صنف + الرصيد =============== */}
+      {/* =============== حركة صنف + الرصيد (اللمسة السحرية والتجميل الشامل) =============== */}
       {tab === "itemMoves" && (
         <>
           <div className="card no-print" style={{ marginBottom: 15, padding: "20px" }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "15px" }}>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>من الفترة
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ marginTop: "5px" }} />
               </label>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>إلى الفترة
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ marginTop: "5px" }} />
               </label>
               <label style={{ fontWeight: "bold", fontSize: "13px" }}>البحث بالصنف أو المعرّف
-                <input className="input" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="ابحث باسم الصنف..." />
+                <input className="input" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="ابحث باسم الصنف..." style={{ marginTop: "5px" }} />
               </label>
               <label style={{ display: "flex", gap: 10, alignItems: "center", cursor: "pointer", height: "100%", marginTop: "15px" }}>
                 <input type="checkbox" checked={itemOnlyWithMoves} onChange={(e) => setItemOnlyWithMoves(e.target.checked)} style={{ transform: "scale(1.2)" }} />
-                <span style={{ fontSize: "13px", fontWeight: "bold" }}>إظهار الأصناف التي لها حركة فقط</span>
+                <span style={{ fontSize: "13px", fontWeight: "bold" }}>إظهار الأصناف النشطة (التي لها حركة) فقط</span>
               </label>
             </div>
           </div>
@@ -1384,22 +1429,33 @@ export default function Ledger() {
                 </thead>
                 <tbody>
                   {!custId ? (
-                    <tr><td colSpan={8} style={{ textalign: "center", color: "var(--muted)", padding: "20px" }}>يرجى اختيار العميل ثم الضغط على (تحديث الحساب) لاستعراض القيود المالية</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>يرجى اختيار العميل ثم الضغط على (تحديث الحساب) لاستعراض القيود المالية</td></tr>
                   ) : (ledgerFiltered || []).length === 0 ? (
-                    <tr><td colSpan={8} style={{ textalign: "center", color: "var(--muted)", padding: "20px" }}>لا توجد حركات مالية مسجلة لهذا العميل في الفترة المحددة</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>لا توجد حركات مالية مسجلة لهذا العميل في الفترة المحددة</td></tr>
                   ) : (
                     (ledgerFiltered || []).map((r, idx) => {
                       const isDetail = !!r.is_detail;
                       return (
-                        <tr key={idx} style={isDetail ? { background: "#fdfdfd", opacity: 0.85 } : { fontWeight: "500" }}>
+                        <tr 
+                          key={idx} 
+                          style={isDetail ? { background: "#fdfdfd", opacity: 0.85 } : { fontWeight: "500" }}
+                        >
                           <td>{idx + 1}</td>
-                          <td>{fmtDate(r.created_at)}</td>
-                          <td style={isDetail ? { color: "#999", fontStyle: "italic" } : { fontWeight: "bold" }}>{isDetail ? "— بند فرعي" : r.kind}</td>
-                          <td><strong>{r.ref || "-"}</strong></td>
+                          <td style={isDetail ? { fontSize: "11px", color: "#888" } : null}>{fmtDate(r.created_at)}</td>
+                          <td style={isDetail ? { color: "#999", fontStyle: "italic" } : { fontWeight: "bold" }}>
+                            {isDetail ? "— بند فرعي" : r.kind}
+                          </td>
+                          <td style={isDetail ? { color: "#777" } : null}><strong>{r.ref || "-"}</strong></td>
+                          
                           <td style={{ color: "#2b6cb0" }}>{isDetail ? "" : (r.debit > 0 ? money(r.debit) : "")}</td>
                           <td style={{ color: "#2f855a" }}>{isDetail ? "" : (r.credit > 0 ? money(r.credit) : "")}</td>
-                          <td style={isDetail ? { color: "#ccc" } : { background: "#f7fafc", fontWeight: "bold", color: "#2d3748" }}>{money(r.running)}</td>
-                          <td style={{ textalign: "right" }}>{r.note || "-"}</td>
+                          <td style={isDetail ? { color: "#ccc" } : { background: "#f7fafc", fontWeight: "bold", color: "#2d3748" }}>
+                            {money(r.running)}
+                          </td>
+                          
+                          <td style={isDetail ? { fontSize: "12px", color: "#4a5568", textAlign: "right" } : { textAlign: "right" }}>
+                            {r.note || "-"}
+                          </td>
                         </tr>
                       );
                     })
@@ -1409,160 +1465,6 @@ export default function Ledger() {
             </div>
           </div>
         </>
-      )}
-
-      {/* =============== ديون العملاء (الفلاتر مدمجة بالكارد لمنع الانكسار العلوي) =============== */}
-      {tab === "customerDebts" && (
-        <div style={{ width: "100%", marginTop: "15px" }}>
-          <div style={{ display: "flex", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
-            <div style={{ flex: "1", minWidth: "220px", background: "#fff5f5", borderRight: "5px solid #e53e3e", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>💰 إجمالي الديون المعروضة</div>
-              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#e53e3e", marginTop: "5px" }}>
-                {money(finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0))} <span style={{ fontSize: "12px" }}>ريال</span>
-              </div>
-            </div>
-
-            <div style={{ flex: "1", minWidth: "220px", background: "#f0fff4", borderRight: "5px solid #38a169", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 عدد العملاء بالفلتر</div>
-              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#38a169", marginTop: "5px" }}>
-                {finalFilteredDebts.filter((r) => r.balance > 0).length} <span style={{ fontSize: "12px" }}>عميل</span>
-              </div>
-            </div>
-
-            <div style={{ flex: "1", minWidth: "220px", background: "#ebf8ff", borderRight: "5px solid #3182ce", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📄 إجمالي فواتير الآجل</div>
-              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#3182ce", marginTop: "5px" }}>
-                {finalFilteredDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)} <span style={{ fontSize: "12px" }}>فاتورة</span>
-              </div>
-            </div>
-
-            <div style={{ flex: "1", minWidth: "220px", background: "#fffaf0", borderRight: "5px solid #dd6b20", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط الدين المتبقي</div>
-              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#dd6b20", marginTop: "5px" }}>
-                {money(
-                  finalFilteredDebts.filter((r) => r.balance > 0).length > 0
-                    ? finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0) / finalFilteredDebts.filter((r) => r.balance > 0).length
-                    : 0
-                )} <span style={{ fontSize: "12px" }}>ريال</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            {/* الفلاتر والأزرار الخاصة بالشاشة موضوعة داخل الكارد لحماية الهيدر العلوي */}
-            <div style={{ display: "flex", gap: "10px", marginBottom: "15px", flexWrap: "wrap", alignItems: "center" }}>
-              <button className="btn" onClick={loadCustomerDebts} disabled={debtsLoading}>
-                {debtsLoading ? "جاري التحميل..." : "تحديث البيانات"}
-              </button>
-              <button className="btn btn-outline" onClick={exportDebtsToCSV} disabled={!finalFilteredDebts.length}>
-                📊 تصدير Excel
-              </button>
-              <button className="btn btn-outline" onClick={printCustomerDebts} disabled={!finalFilteredDebts.length}>
-                🖨️ طباعة المفلتر
-              </button>
-              
-              <select 
-                className="input" 
-                style={{ maxWidth: 180, border: "1px solid #aaa" }} 
-                value={agingFilter} 
-                onChange={(e) => setAgingFilter(e.target.value)}
-              >
-                <option value="all">📁 كل الحسابات</option>
-                <option value="critical">🔴 ديون حرجة (&gt;15 يوم)</option>
-                <option value="warning">🟡 ديون متوسطة (&gt;5 أيام)</option>
-                <option value="safe">🟢 تمام ومستقر (≤ يومين)</option>
-              </select>
-
-              <input
-                className="input"
-                placeholder="بحث باسم العميل..."
-                value={debtSearch}
-                onChange={(e) => setDebtSearch(e.target.value)}
-                style={{ maxWidth: 220 }}
-              />
-            </div>
-
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>العميل</th>
-                    <th>الرصيد الافتتاحي</th>
-                    <th>إجمالي الفواتير</th>
-                    <th>إجمالي السداد</th>
-                    <th>المتبقي (الدين)</th>
-                    <th>عدد الفواتير</th>
-                    <th>آخر فاتورة</th>
-                    <th>آخر سداد</th>
-                    <th>حالة الحساب</th>
-                    <th>خيارات ومتابعة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {finalFilteredDebts.length === 0 ? (
-                    <tr><td colSpan={11} style={{ textalign: "center", color: "var(--muted)" }}>لا توجد ديون تطابق خيارات البحث أو التصفية الحالية</td></tr>
-                  ) : (
-                    finalFilteredDebts.map((c, i) => (
-                      <tr key={c.id}>
-                        <td>{i + 1}</td>
-                        <td><strong>{c.name}</strong></td>
-                        <td>{money(c.opening)}</td>
-                        <td>{money(c.invoices)}</td>
-                        <td>{money(c.payments)}</td>
-                        <td><b style={{ color: "red" }}>{money(c.balance)}</b></td>
-                        <td>{c.invoiceCount}</td>
-                        <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastInvoice}</span></td>
-                        <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastPayment}</span></td>
-                        <td>
-                          {c.agingStatus === "critical" && <span className="pill pill-out" style={{ background: "#fff5f5", color: "#e53e3e", border: "1px solid #e53e3e", padding: "2px 8px" }}>🔴 حرج (&gt;15 يوم)</span>}
-                          {c.agingStatus === "warning" && <span className="pill" style={{ background: "#fffaf0", color: "#dd6b20", border: "1px solid #dd6b20", padding: "2px 8px" }}>🟡 متوسط (&gt;5 أيام)</span>}
-                          {c.agingStatus === "safe" && <span className="pill pill-in" style={{ background: "#f0fff4", color: "#38a169", border: "1px solid #38a169", padding: "2px 8px" }}>🟢 تمام (≤ يومين)</span>}
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
-                            <button
-                              className="btn btn-outline"
-                              onClick={() => {
-                                setCustId(String(c.id));
-                                setTab("customerLedger");
-                                setTimeout(() => loadCustomerLedger(), 100);
-                              }}
-                              style={{ padding: "3px 8px", fontSize: "11px", minHeight: "auto", whiteSpace: "nowrap" }}
-                            >
-                              📄 كشف الحساب
-                            </button>
-                            <button
-                              className="btn"
-                              onClick={() => sendWhatsAppReminder(c)}
-                              style={{ padding: "3px 8px", fontSize: "11px", minHeight: "auto", background: "#25D366", color: "#fff", borderColor: "#25D366", whiteSpace: "nowrap" }}
-                            >
-                              💬 تذكير واتساب
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                  {finalFilteredDebts.length > 0 && (
-                    <tr style={{ fontWeight: "bold", background: "var(--border-color)", borderTop: "2px solid #aaa" }}>
-                      <td colSpan="2">الإجمالي العام المستعرض</td>
-                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.opening || 0), 0))}</td>
-                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.invoices || 0), 0))}</td>
-                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.payments || 0), 0))}</td>
-                      <td style={{ color: "red" }}>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0))}</td>
-                      <td>{finalFilteredDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)}</td>
-                      <td>-</td>
-                      <td>-</td>
-                      <td>-</td>
-                      <td>-</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* =============== تقرير الجيجا =============== */}
@@ -1597,7 +1499,7 @@ export default function Ledger() {
                 <thead><tr><th>#</th><th>التاريخ</th><th>العميل</th><th>فاتورة</th><th>قراءة سابقة</th><th>قراءة حالية</th><th>استهلاك</th><th>سعر الجيجا</th><th>إجمالي القيود</th></tr></thead>
                 <tbody>
                   {(gigaFilteredRows || []).length === 0 ? (
-                    <tr><td colSpan={9} style={{ textalign: "center", color: "var(--muted)" }}>لا توجد بيانات فواتير جيجا مسجلة</td></tr>
+                    <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات فواتير جيجا مسجلة</td></tr>
                   ) : (
                     gigaFilteredRows.map((r, idx) => (
                       <tr key={r.key || idx}><td>{idx + 1}</td><td>{r.invoice_date}</td><td>{r.customer_name}</td><td>{r.invoice_id}</td><td>{r.prev_reading_gb}</td><td>{r.curr_reading_gb}</td><td style={{ fontWeight: 900 }}>{r.usage_gb}</td><td>{money(r.price_per_gb)}</td><td style={{ fontWeight: 900 }}>{money(r.line_total)}</td></tr>
