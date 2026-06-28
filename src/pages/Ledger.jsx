@@ -1,4 +1,3 @@
-// src/pages/Ledger.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -46,12 +45,11 @@ function buildRunning(rows, opening = 0) {
 }
 
 function getCardBalanceFromRow(row) {
-  // نحاول نلقط أي عمود رصيد موجود (غالباً يجي من card_stock)
   return safeNum(
     pick(
       row,
       [
-        "quantity", // card_stock.quantity
+        "quantity",
         "current_qty",
         "stock_qty",
         "balance",
@@ -68,9 +66,8 @@ export default function Ledger() {
   // Tabs
   const [tab, setTab] = useState("cardMoves");
   const [customerDebts, setCustomerDebts] = useState([]);
-const [debtsLoading, setDebtsLoading] = useState(false);
-const [debtSearch, setDebtSearch] = useState("");
-
+  const [debtsLoading, setDebtsLoading] = useState(false);
+  const [debtSearch, setDebtSearch] = useState("");
 
   // ===== Auth / Seller Guard =====
   const [authUser, setAuthUser] = useState(null);
@@ -82,21 +79,18 @@ const [debtSearch, setDebtSearch] = useState("");
         const { data } = await supabase.auth.getUser();
         const u = data?.user || null;
         setAuthUser(u);
-        // نفترض وجود seller_user_id في الفواتير وحركات الكروت
-        // إذا عندك نظام صلاحيات أدق (perms/role) عدّله هنا فقط
         setIsSeller(!!u);
       } catch {}
     })();
   }, []);
- // cardMoves | itemMoves | customerLedger | giga
 
   // Shared Filters
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
 
-  // ===== Giga Reports (قراءات الجيجا) =====
+  // ===== Giga Reports =====
   const [gigaLoading, setGigaLoading] = useState(false);
-  const [gigaRows, setGigaRows] = useState([]); // flat rows per invoice line
+  const [gigaRows, setGigaRows] = useState([]); 
   const [gigaCustomerId, setGigaCustomerId] = useState("all");
   const [gigaQ, setGigaQ] = useState("");
 
@@ -106,12 +100,12 @@ const [debtSearch, setDebtSearch] = useState("");
   const [cardTypes, setCardTypes] = useState([]);
   const [usingView, setUsingView] = useState(true);
   const [cardTypeId, setCardTypeId] = useState("all");
-  const [mType, setMType] = useState("all"); // all | IN | OUT
+  const [mType, setMType] = useState("all"); 
   const [q, setQ] = useState("");
 
-  // ===== Item Moves (ملخص حركة صنف + الرصيد) =====
+  // ===== Item Moves =====
   const [itemSearch, setItemSearch] = useState("");
-  const [itemOnlyWithMoves, setItemOnlyWithMoves] = useState(true); // افتراضياً نخفي الأصناف بدون حركة
+  const [itemOnlyWithMoves, setItemOnlyWithMoves] = useState(true); 
 
   // ===== Customer Ledger =====
   const [customers, setCustomers] = useState([]);
@@ -124,7 +118,6 @@ const [debtSearch, setDebtSearch] = useState("");
 
   // ===================== Loaders =====================
   async function loadCardTypes() {
-    // نجيب الأنواع + رصيد كل نوع من card_stock (عشان يظهر الرصيد الحالي صح)
     const [{ data: types, error: typeErr }, { data: stocks, error: stockErr }] = await Promise.all([
       supabase.from("card_types").select("*").order("name", { ascending: true }),
       supabase.from("card_stock").select("card_type_id,quantity"),
@@ -153,12 +146,8 @@ const [debtSearch, setDebtSearch] = useState("");
   async function loadMovements() {
     setLoading(true);
     try {
-      // ✅ الآن نعتمد على View التقرير الموحد (v_card_movements_report)
-      // لأنه فيه: رقم الفاتورة + العميل + المصدر + الرصيد قبل/بعد
-      // وفي حالة ما كان الـ View موجود لأي سبب، نرجع تلقائياً للجدول الأساسي.
-
-      const fromDate = `${from}`; // YYYY-MM-DD
-      const toDate = `${to}`; // YYYY-MM-DD
+      const fromDate = `${from}`; 
+      const toDate = `${to}`; 
 
       const tryView = async () => {
         setUsingView(true);
@@ -180,8 +169,6 @@ const [debtSearch, setDebtSearch] = useState("");
       const viewRes = await tryView();
       if (viewRes.error) {
         console.warn("v_card_movements_report not available, fallback to card_movements", viewRes.error);
-
-        // fallback
         setUsingView(false);
         const fromTs = `${from}T00:00:00`;
         const toTs = `${to}T23:59:59.999`;
@@ -209,14 +196,10 @@ const [debtSearch, setDebtSearch] = useState("");
     }
   }
 
-  // normalize card moves (View or Table)  ✅ مهم: هذا كان مخرب بالنسخة السابقة (اختلاط الأقواس داخل useMemo)
   const normalizedMoves = useMemo(() => {
     const baseRows = (moves || []).map((r, idx) => {
-      const created =
-        r.created_at || r.date || r.movement_date || r.createdAt || r.created || null;
-      const movementType =
-        r.movement_type || r.type || r.movement || r.direction || "";
-
+      const created = r.created_at || r.date || r.movement_date || r.createdAt || r.created || null;
+      const movementType = r.movement_type || r.type || r.movement || r.direction || "";
       const qty = Number(r.qty ?? r.quantity ?? r.amount ?? 0) || 0;
       const noteText = String(r.note ?? r.notes ?? "");
       const invMatch = noteText.match(/INV-\d+/);
@@ -228,55 +211,33 @@ const [debtSearch, setDebtSearch] = useState("");
         created_at: created,
         movement_type: movementType,
         qty,
-        card_type_id:
-          r.card_type_id ?? r.cardTypeId ?? r.card_type ?? r.card_id ?? null,
+        card_type_id: r.card_type_id ?? r.cardTypeId ?? r.card_type ?? r.card_id ?? null,
         card_name: r.card_name ?? r.card_types?.name ?? r.card ?? r.name ?? r.cardTypeName ?? "",
         customer_name: r.customer_name ?? r.customer ?? "",
-        invoice_no:
-          r.invoice_no ?? r.invoice_number ?? r.invoice ?? inferredInvoice,
-        source:
-          r.invoice_source ?? r.source ?? r.src ?? (inferredInvoice ? "invoice" : ""),
+        invoice_no: r.invoice_no ?? r.invoice_number ?? r.invoice ?? inferredInvoice,
+        source: r.invoice_source ?? r.source ?? r.src ?? (inferredInvoice ? "invoice" : ""),
         note: noteText,
-        // قد تأتي من View جاهز، وإذا غير موجودة سنحسبها
         before_qty: r.before_qty ?? r.balance_before ?? r.before ?? null,
         after_qty: r.after_qty ?? r.balance_after ?? r.after ?? null,
       };
     });
 
-    // نحسب الرصيد (قبل/بعد) لكل كرت حسب الترتيب الزمني
-    baseRows.sort(
-      (a, b) =>
-        new Date(a.created_at || 0) - new Date(b.created_at || 0) ||
-        a._idx - b._idx
-    );
+    baseRows.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0) || a._idx - b._idx);
 
     const running = new Map();
     const withRunning = baseRows.map((row) => {
       const key = String(row.card_type_id ?? row.card_name ?? "unknown");
       const prevComputed = Number(running.get(key) ?? 0) || 0;
-
-      // لو الـ before_qty موجود، نعتبره هو بداية الرصيد الحقيقي
       const before = Number(row.before_qty ?? prevComputed) || 0;
       const q = Number(row.qty) || 0;
       const afterComputed = row.movement_type === "IN" ? before + q : before - q;
-
       const afterFinal = Number(row.after_qty ?? afterComputed) || 0;
       running.set(key, afterFinal);
 
-      return {
-        ...row,
-        before_qty: before,
-        after_qty: afterFinal,
-      };
+      return { ...row, before_qty: before, after_qty: afterFinal };
     });
 
-    // للعرض نرجّع الأحدث أولاً
-    withRunning.sort(
-      (a, b) =>
-        new Date(b.created_at || 0) - new Date(a.created_at || 0) ||
-        b._idx - a._idx
-    );
-
+    withRunning.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || b._idx - a._idx);
     return withRunning;
   }, [moves]);
 
@@ -305,8 +266,7 @@ const [debtSearch, setDebtSearch] = useState("");
 
   // ===================== Item Moves Summary =====================
   const itemSummaryRows = useMemo(() => {
-    // نجمع من filteredMoves حسب الصنف
-    const byId = new Map(); // card_type_id -> summary
+    const byId = new Map(); 
     for (const m of filteredMoves || []) {
       const id = String(m.card_type_id ?? "");
       if (!id) continue;
@@ -320,31 +280,21 @@ const [debtSearch, setDebtSearch] = useState("");
       s.net = s.inQty - s.outQty;
     }
 
-    // نضيف الرصيد من card_types حتى لو ما في حركة (اختياري)
     const out = [];
     for (const ct of cardTypes || []) {
       const id = String(ct.id);
       const name = ct.name || ct.card_name || ct.title || "-";
       const bal = getCardBalanceFromRow(ct);
-
       const s = byId.get(id) || { card_type_id: ct.id, card_name: name, inQty: 0, outQty: 0, net: 0, moves: 0 };
-      out.push({
-        ...s,
-        card_name: s.card_name && s.card_name !== "-" ? s.card_name : name,
-        balance_now: bal,
-      });
+      out.push({ ...s, card_name: s.card_name && s.card_name !== "-" ? s.card_name : name, balance_now: bal });
     }
 
-    // فلترة بحث داخل ملخص الأصناف
     const ss = String(itemSearch || "").trim().toLowerCase();
     let res = out;
     if (ss) {
       res = res.filter((r) => String(r.card_name || "").toLowerCase().includes(ss) || String(r.card_type_id).includes(ss));
     }
-
     if (itemOnlyWithMoves) res = res.filter((r) => safeNum(r.moves) > 0);
-
-    // ترتيب: الأكثر حركة ثم الاسم
     res.sort((a, b) => safeNum(b.moves) - safeNum(a.moves) || String(a.card_name).localeCompare(String(b.card_name), "ar"));
     return res;
   }, [filteredMoves, cardTypes, itemSearch, itemOnlyWithMoves]);
@@ -362,52 +312,41 @@ const [debtSearch, setDebtSearch] = useState("");
   // ===================== Customer Ledger =====================
   async function fetchInvoiceDetails(invoiceIds) {
     const map = new Map();
-
-    // 1) try view
     try {
       const { data, error } = await supabase.from("v_invoice_lines").select("*").in("invoice_id", invoiceIds);
       if (error) throw error;
-
       (data || []).forEach((l) => {
         const invId = Number(l.invoice_id);
         const name = l.card_name ?? l.name ?? l.card_type_name ?? l.item_name ?? "-";
         const qty = safeNum(l.qty);
         const price = safeNum(l.price);
         const total = safeNum(l.line_total ?? qty * price);
-
         if (!map.has(invId)) map.set(invId, []);
         map.get(invId).push({ item: name, qty, price, total, note: l.note || "" });
       });
-
       return map;
     } catch (e) {
       console.warn("v_invoice_lines not available, fallback to invoice_line_items", e);
     }
 
-    // 2) fallback: invoice_line_items + card_types
     const { data, error } = await supabase
       .from("invoice_line_items")
       .select("invoice_id,card_type_id,qty,price,line_total,usage_gb,prev_reading_gb,curr_reading_gb,price_per_gb,card_types(name)")
       .in("invoice_id", invoiceIds);
 
     if (error) throw error;
-
     (data || []).forEach((l) => {
       const invId = Number(l.invoice_id);
       const isGiga = l.usage_gb !== null && l.usage_gb !== undefined;
-
       const name = isGiga
         ? `جيجا: ${safeNum(l.prev_reading_gb)} → ${safeNum(l.curr_reading_gb)} (استهلاك ${safeNum(l.usage_gb)})`
         : l.card_types?.name || `كرت ${l.card_type_id}`;
-
       const qty = isGiga ? safeNum(l.usage_gb) : safeNum(l.qty);
       const price = isGiga ? safeNum(l.price_per_gb) : safeNum(l.price);
       const total = safeNum(l.line_total ?? qty * price);
-
       if (!map.has(invId)) map.set(invId, []);
       map.get(invId).push({ item: name, qty, price, total, note: "" });
     });
-
     return map;
   }
 
@@ -415,11 +354,9 @@ const [debtSearch, setDebtSearch] = useState("");
     const out = [];
     for (const r of baseRows || []) {
       out.push(r);
-
       const isInvoice = String(r.kind || "").includes("فاتورة");
       const invId = Number(r.invoice_id || 0);
       if (!isInvoice || !invId) continue;
-
       const lines = detailsMap.get(invId) || [];
       for (const ln of lines) {
         out.push({
@@ -428,9 +365,7 @@ const [debtSearch, setDebtSearch] = useState("");
           ref: r.ref,
           debit: 0,
           credit: 0,
-          note:
-            `${ln.item} | qty=${safeNum(ln.qty)} | price=${money(ln.price)} | total=${money(ln.total)}` +
-            (ln.note ? ` | ${ln.note}` : ""),
+          note: `${ln.item} | qty=${safeNum(ln.qty)} | price=${money(ln.price)} | total=${money(ln.total)}` + (ln.note ? ` | ${ln.note}` : ""),
           invoice_id: invId,
           is_detail: true,
         });
@@ -446,15 +381,12 @@ const [debtSearch, setDebtSearch] = useState("");
       const dTo = new Date(to);
       dTo.setDate(dTo.getDate() + 1);
       const toPlus1 = dTo.toISOString().slice(0, 10);
-
       const fromTs = `${from}T00:00:00`;
       const toTs = `${toPlus1}T00:00:00`;
-
       const cid = Number(custId);
       const cust = (customers || []).find((c) => Number(c.id) === cid);
       const opening = safeNum(cust?.opening_balance);
 
-      // 1) try view first (if exists)
       try {
         const { data, error } = await supabase
           .from("v_customer_ledger")
@@ -464,18 +396,7 @@ const [debtSearch, setDebtSearch] = useState("");
           .lt("created_at", toTs)
           .order("created_at", { ascending: true });
 
-      // إجبارية للبائع
-      if (isSeller && authUser?.id) {
-        // في حال كان البائع مربوط بفواتيره فقط
-        // نفترض وجود seller_user_id
-        // @ts-ignore
-        // eslint-disable-next-line
-        // supabase يعيد query جديد
-      }
-
         if (error) throw error;
-
-        // حماية: أحيانًا يرجع Supabase null أو Object بدل Array
         const safeData = Array.isArray(data) ? data : [];
         const rows = safeData.map((r) => ({
           created_at: r.created_at,
@@ -489,7 +410,6 @@ const [debtSearch, setDebtSearch] = useState("");
         }));
 
         setLedgerUsingView(true);
-
         if (ledgerDetailed) {
           const invIds = Array.from(new Set(rows.filter((x) => x.invoice_id).map((x) => Number(x.invoice_id))));
           if (invIds.length) {
@@ -508,7 +428,6 @@ const [debtSearch, setDebtSearch] = useState("");
         console.warn("v_customer_ledger not available, using invoices+payments", e);
       }
 
-      // 2) fallback: invoices + payments
       const { data: invs, error: invErr } = await supabase
         .from("invoices")
         .select("id,number,invoice_date,total_after_discount,note,created_at")
@@ -557,7 +476,6 @@ const [debtSearch, setDebtSearch] = useState("");
       });
 
       const merged = [...invRows, ...payRows].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-
       if (ledgerDetailed) {
         const invIds = Array.from(new Set(invRows.map((x) => Number(x.invoice_id)).filter(Boolean)));
         const details = invIds.length ? await fetchInvoiceDetails(invIds) : new Map();
@@ -573,190 +491,152 @@ const [debtSearch, setDebtSearch] = useState("");
       setLedgerLoading(false);
     }
   }
+
+  // ===================== Customer Debts (v1 Implementation) =====================
   async function loadCustomerDebts() {
-  setDebtsLoading(true);
+    setDebtsLoading(true);
+    try {
+      const { data: customersData, error: cErr } = await supabase
+        .from("customers")
+        .select("id,name,opening_balance")
+        .order("name");
+      if (cErr) throw cErr;
 
-  try {
-    const { data: customersData, error: cErr } = await supabase
-      .from("customers")
-      .select("id,name,opening_balance")
-      .order("name");
+      const { data: invoices } = await supabase
+        .from("invoices")
+        .select("customer_id,total_after_discount,invoice_datetime,status")
+        .not("status", "eq", "مرتجع");
 
-    if (cErr) throw cErr;
+      const { data: payments } = await supabase
+        .from("payments")
+        .select("customer_id,amount,pay_date");
 
-    const { data: invoices } = await supabase
-      .from("invoices")
-      .select("customer_id,total_after_discount");
+      const rows = (customersData || []).map((c) => {
+        const cInvoices = (invoices || []).filter((i) => i.customer_id === c.id);
+        const cPayments = (payments || []).filter((p) => p.customer_id === c.id);
 
-    const { data: payments } = await supabase
-      .from("payments")
-      .select("customer_id,amount");
+        const opening = Number(c.opening_balance || 0);
+        const invTotal = cInvoices.reduce((a, b) => a + Number(b.total_after_discount || 0), 0);
+        const payTotal = cPayments.reduce((a, b) => a + Number(b.amount || 0), 0);
+        const balance = opening + invTotal - payTotal;
 
-    const rows = (customersData || []).map((c) => {
+        const invoiceCount = cInvoices.length;
 
-      const opening = Number(c.opening_balance || 0);
+        const lastInvoice = cInvoices.length > 0
+          ? cInvoices.sort((a, b) => new Date(b.invoice_datetime) - new Date(a.invoice_datetime))[0].invoice_datetime.slice(0, 10)
+          : "-";
 
-      const invTotal = (invoices || [])
-        .filter(i => i.customer_id === c.id)
-        .reduce((a,b)=>a+Number(b.total_after_discount||0),0);
+        const lastPayment = cPayments.length > 0
+          ? cPayments.sort((a, b) => new Date(b.pay_date) - new Date(a.pay_date))[0].pay_date.slice(0, 10)
+          : "-";
 
-      const payTotal = (payments || [])
-        .filter(p=>p.customer_id===c.id)
-        .reduce((a,b)=>a+Number(b.amount||0),0);
+        return {
+          id: c.id,
+          name: c.name,
+          opening,
+          invoices: invTotal,
+          payments: payTotal,
+          balance,
+          invoiceCount,
+          lastInvoice,
+          lastPayment
+        };
+      }).filter((r) => r.balance > 0);
 
-      const balance = opening + invTotal - payTotal;
-
-      return {
-  id:c.id,
-  name:c.name,
-  opening,
-  invoices:invTotal,
-  payments:payTotal,
-  balance
-};
-
-    }).filter(r=>r.balance>0);
-
-    console.log("ROWS =", rows);
-    setCustomerDebts(rows);
-
-  } catch(err){
-    console.error("Customer Debts Error:", err);
-    alert(JSON.stringify(err, null, 2));
-} finally{
-    setDebtsLoading(false);
+      console.log("ROWS =", rows);
+      setCustomerDebts(rows);
+    } catch (err) {
+      console.error("Customer Debts Error:", err);
+      alert(JSON.stringify(err, null, 2));
+    } finally {
+      setDebtsLoading(false);
+    }
   }
-}
+
   function printCustomerDebts() {
-  if (!customerDebts || customerDebts.length === 0) {
-    alert("لا توجد بيانات للطباعة");
-    return;
-  }
+    if (!customerDebts || customerDebts.length === 0) {
+      alert("لا توجد بيانات للطباعة");
+      return;
+    }
 
-  const totalOpening = customerDebts.reduce(
-  (s, r) => s + Number(r.opening || 0),
-  0
-);
+    const totalOpening = customerDebts.reduce((s, r) => s + Number(r.opening || 0), 0);
+    const totalInvoices = customerDebts.reduce((s, r) => s + Number(r.invoices || 0), 0);
+    const totalPaid = customerDebts.reduce((s, r) => s + Number(r.payments || 0), 0);
+    const totalRemain = customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0);
+    const totalInvoicesCount = customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0);
 
-const totalInvoices = customerDebts.reduce(
-  (s, r) => s + Number(r.invoices || 0),
-  0
-);
-
-const totalPaid = customerDebts.reduce(
-  (s, r) => s + Number(r.payments || 0),
-  0
-);
-
-const totalRemain = customerDebts.reduce(
-  (s, r) => s + Number(r.balance || 0),
-  0
-);
-
-    console.log(customerDebts);
     const rows = customerDebts
-    .map(
-      (r, i) => `
-<tr>
-<td>${i + 1}</td>
-<td>${r.name || ""}</td>
-<td>${Number(r.opening || 0).toFixed(2)}</td>
-<td>${Number(r.invoices || 0).toFixed(2)}</td>
-<td>${Number(r.payments || 0).toFixed(2)}</td>
-<td>${Number(r.balance || 0).toFixed(2)}</td>
-</tr>`
-    )
-    .join("");
+      .map(
+        (r, i) => `
+  <tr>
+  <td>${i + 1}</td>
+  <td>${r.name || ""}</td>
+  <td>${Number(r.opening || 0).toFixed(2)}</td>
+  <td>${Number(r.invoices || 0).toFixed(2)}</td>
+  <td>${Number(r.payments || 0).toFixed(2)}</td>
+  <td style="color: red; font-weight: bold;">${Number(r.balance || 0).toFixed(2)}</td>
+  <td>${r.invoiceCount || 0}</td>
+  <td>${r.lastInvoice || "-"}</td>
+  <td>${r.lastPayment || "-"}</td>
+  </tr>`
+      )
+      .join("");
 
-  const w = window.open("", "_blank");
-
-  w.document.write(`
-<!DOCTYPE html>
-<html dir="rtl">
-<head>
-<meta charset="utf-8">
-<title>ديون العملاء</title>
-
-<style>
-body{
-font-family:Tahoma;
-padding:20px;
-}
-
-h2{
-text-align:center;
-margin-bottom:5px;
-}
-
-table{
-width:100%;
-border-collapse:collapse;
-margin-top:20px;
-}
-
-th,td{
-border:1px solid #888;
-padding:8px;
-text-align:center;
-}
-
-th{
-background:#f0f0f0;
-}
-
-tfoot td{
-font-weight:bold;
-background:#fafafa;
-}
-</style>
-
-</head>
-
-<body>
-
-<h2>تقرير ديون العملاء</h2>
-
-<div>التاريخ: ${new Date().toLocaleDateString("ar-SA")}</div>
-
-<table>
-
-<thead>
-<tr>
-<th>#</th>
-<th>العميل</th>
-<th>الرصيد الافتتاحي</th>
-<th>إجمالي الفواتير</th>
-<th>إجمالي السداد</th>
-<th>المتبقي</th>
-</tr>
-</thead>
-
-<tbody>
-${rows}
-</tbody>
-
-<tfoot>
-<tr>
-<td colspan="2">الإجمالي</td>
-<td>${totalOpening.toFixed(2)}</td>
-<td>${totalInvoices.toFixed(2)}</td>
-<td>${totalPaid.toFixed(2)}</td>
-<td>${totalRemain.toFixed(2)}</td>
-</tr>
-</tfoot>
-
-</table>
-
-<script>
-window.print();
-</script>
-
-</body>
-</html>
-`);
-
-  w.document.close();
-}
+    const w = window.open("", "_blank");
+    w.document.write(`
+  <!DOCTYPE html>
+  <html dir="rtl">
+  <head>
+  <meta charset="utf-8">
+  <title>تقرير ديون العملاء الإداري</title>
+  <style>
+  body{ font-family:Tahoma, Arial; padding:20px; }
+  h2{ text-align:center; margin-bottom:5px; }
+  table{ width:100%; border-collapse:collapse; margin-top:20px; }
+  th,td{ border:1px solid #888; padding:8px; text-align:center; font-size: 13px; }
+  th{ background:#f0f0f0; }
+  tfoot td{ font-weight:bold; background:#e9e9e9; }
+  </style>
+  </head>
+  <body>
+  <h2>تقرير ديون العملاء الإداري</h2>
+  <div>تاريخ الاستخراج: ${new Date().toLocaleDateString("ar-SA")}</div>
+  <table>
+  <thead>
+  <tr>
+  <th>#</th>
+  <th>العميل</th>
+  <th>الرصيد الافتتاحي</th>
+  <th>إجمالي الفواتير</th>
+  <th>إجمالي السداد</th>
+  <th>المتبقي</th>
+  <th>عدد الفواتير</th>
+  <th>آخر فاتورة</th>
+  <th>آخر سداد</th>
+  </tr>
+  </thead>
+  <tbody>
+  ${rows}
+  </tbody>
+  <tfoot>
+  <tr>
+  <td colspan="2">الإجمالي العام</td>
+  <td>${totalOpening.toFixed(2)}</td>
+  <td>${totalInvoices.toFixed(2)}</td>
+  <td>${totalPaid.toFixed(2)}</td>
+  <td style="color: red;">${totalRemain.toFixed(2)}</td>
+  <td>${totalInvoicesCount}</td>
+  <td>-</td>
+  <td>-</td>
+  </tr>
+  </tfoot>
+  </table>
+  <script>window.print();</script>
+  </body>
+  </html>
+  `);
+    w.document.close();
+  }
 
   const selectedCustomer = useMemo(() => {
     if (!custId) return null;
@@ -766,7 +646,6 @@ window.print();
   const ledgerFiltered = useMemo(() => {
     const s = String(ledgerSearch || "").trim().toLowerCase();
     if (!s) return ledgerRows;
-
     return (ledgerRows || []).filter((r) => {
       const a = String(r.kind || "").toLowerCase();
       const b = String(r.ref || "").toLowerCase();
@@ -792,9 +671,7 @@ window.print();
     const rows = gigaRows || [];
     const s = String(gigaQ || "").trim().toLowerCase();
     if (!s) return rows;
-    return rows.filter(
-      (r) => (r.customer_name || "").toLowerCase().includes(s) || String(r.invoice_id || "").includes(s)
-    );
+    return rows.filter((r) => (r.customer_name || "").toLowerCase().includes(s) || String(r.invoice_id || "").includes(s));
   }, [gigaRows, gigaQ]);
 
   const gigaSummary = useMemo(() => {
@@ -809,7 +686,6 @@ window.print();
   async function loadGigaReport() {
     setGigaLoading(true);
     try {
-      // 1) invoices (giga only) in date range
       let qInv = supabase
         .from("invoices")
         .select("id,invoice_date,customer_id,invoice_type,total_after_discount,paid_amount,remaining_amount,created_at")
@@ -819,39 +695,32 @@ window.print();
         .order("invoice_date", { ascending: true });
 
       if (gigaCustomerId !== "all") qInv = qInv.eq("customer_id", gigaCustomerId);
-
       const { data: invs, error: eInv } = await qInv;
       if (eInv) throw eInv;
 
       const safeInvs = Array.isArray(invs) ? invs : [];
-
       const invoiceIds = safeInvs.map((x) => Number(x.id)).filter(Boolean);
       if (invoiceIds.length === 0) {
         setGigaRows([]);
         return;
       }
 
-      // 2) lines (usage only)
       const { data: lines, error: eLines } = await supabase
         .from("invoice_line_items")
         .select("invoice_id,prev_reading_gb,curr_reading_gb,usage_gb,price_per_gb,line_total")
         .in("invoice_id", invoiceIds);
-
       if (eLines) throw eLines;
 
-      // 3) customers map
       const custIds = Array.from(new Set(safeInvs.map((x) => Number(x.customer_id)).filter(Boolean)));
       const { data: custs, error: eCust } = await supabase
         .from("customers")
         .select("id,name,type,price_per_gb,last_reading_gb")
         .in("id", custIds);
-
       if (eCust) throw eCust;
 
       const custMap = new Map((custs || []).map((c) => [Number(c.id), c]));
       const invMap = new Map(safeInvs.map((i) => [Number(i.id), i]));
 
-      // flat rows
       const safeLines = Array.isArray(lines) ? lines : [];
       const rows = safeLines
         .filter((l) => l.usage_gb !== null && l.usage_gb !== undefined)
@@ -911,13 +780,7 @@ window.print();
           <tr><th style="border:1px solid #ddd;padding:6px;">#</th><th style="border:1px solid #ddd;padding:6px;">التاريخ</th><th style="border:1px solid #ddd;padding:6px;">العميل</th><th style="border:1px solid #ddd;padding:6px;">فاتورة</th><th style="border:1px solid #ddd;padding:6px;">قراءة سابقة</th><th style="border:1px solid #ddd;padding:6px;">قراءة حالية</th><th style="border:1px solid #ddd;padding:6px;">استهلاك</th><th style="border:1px solid #ddd;padding:6px;">سعر الجيجا</th><th style="border:1px solid #ddd;padding:6px;">الإجمالي</th></tr>
         </thead>
         <tbody>
-          ${rows
-            .map(
-              (r, i) => `
-            <tr><td style="border:1px solid #ddd;padding:6px;">${i + 1}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.customer_name || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td><td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td></tr>
-          `
-            )
-            .join("")}
+          ${rows.map((r, i) => `<tr><td style="border:1px solid #ddd;padding:6px;">${i + 1}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.customer_name || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td><td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td></tr>`).join("")}
         </tbody>
       </table>
     `;
@@ -927,16 +790,9 @@ window.print();
         <head>
           <meta charset="UTF-8" />
           <title>${title}</title>
-          <style>
-            body{ font-family: Arial, sans-serif; padding:16px; }
-            @media print { .no-print{ display:none !important; } }
-          </style>
+          <style>body{ font-family: Arial, sans-serif; padding:16px; } @media print { .no-print{ display:none !important; } }</style>
         </head>
-        <body>
-          ${hdr}
-          ${table}
-          <script>window.onload=function(){ window.print(); };</script>
-        </body>
+        <body>${hdr}${table}<script>window.onload=function(){ window.print(); };</script></body>
       </html>
     `;
     const w = window.open("", "_blank");
@@ -946,13 +802,12 @@ window.print();
     w.document.close();
   }
 
-  // auto reload on tab/filters
   useEffect(() => {
     if (tab === "giga") loadGigaReport();
     // eslint-disable-next-line
   }, [tab, from, to, gigaCustomerId]);
 
-  // ===================== Printing =====================
+  // ===================== Printing Helpers =====================
   async function getSettingsHeader() {
     try {
       const { data } = await supabase.from("settings").select("*").limit(1).maybeSingle();
@@ -969,7 +824,6 @@ window.print();
   }
 
   function basePrintCss() {
-    // ستايل قريب من الفواتير: نظيف، حدود خفيفة، عنوان قوي
     return `
       body{font-family: Arial, sans-serif; padding:18px; color:#111}
       .head{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:14px}
@@ -994,9 +848,7 @@ window.print();
     const htmlRows = rows
       .map((r, idx) => {
         const isIn = String(r.movement_type) === "IN";
-        return `
-          <tr><td>${idx + 1}</td><td>${escapeHtml(fmtDate(r.created_at))}</td><td>${escapeHtml(r.card_name)}</td><td>${isIn ? "IN" : "OUT"}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(r.invoice_no)}</td><td>${escapeHtml(r.customer_name)}</td><td style="font-weight:800">${escapeHtml(r.qty)}</td><td>${escapeHtml(r.before_qty ?? "")}</td><td>${escapeHtml(r.after_qty ?? "")}</td><td>${escapeHtml(r.note || "-")}</td></tr>
-        `;
+        return `<tr><td>${idx + 1}</td><td>${escapeHtml(fmtDate(r.created_at))}</td><td>${escapeHtml(r.card_name)}</td><td>${isIn ? "IN" : "OUT"}</td><td>${escapeHtml(r.source)}</td><td>${escapeHtml(r.invoice_no)}</td><td>${escapeHtml(r.customer_name)}</td><td style="font-weight:800">${escapeHtml(r.qty)}</td><td>${escapeHtml(r.before_qty ?? "")}</td><td>${escapeHtml(r.after_qty ?? "")}</td><td>${escapeHtml(r.note || "-")}</td></tr>`;
       })
       .join("");
 
@@ -1005,17 +857,11 @@ window.print();
 
     w.document.write(`
       <html lang="ar" dir="rtl">
-      <head>
-        <meta charset="UTF-8" />
-        <title>تقرير حركة الكروت</title>
-        <style>${basePrintCss()}</style>
-      </head>
+      <head><meta charset="UTF-8" /><title>تقرير حركة الكروت</title><style>${basePrintCss()}</style></head>
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
-              hdr.name
-            )} — تقرير حركة الكروت</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — تقرير حركة الكروت</div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
             <div class="sub">${usingView ? "المصدر: View v_card_movements" : "المصدر: Table card_movements"}</div>
           </div>
@@ -1025,25 +871,16 @@ window.print();
             <div class="sub">وقت الطباعة: ${escapeHtml(new Date().toLocaleString("ar-EG"))}</div>
           </div>
         </div>
-
         <div class="sum">
           <div class="box kpi"><div class="muted">IN</div><div class="v">${money(totalsMoves.inQty)}</div></div>
           <div class="box kpi"><div class="muted">OUT</div><div class="v">${money(totalsMoves.outQty)}</div></div>
           <div class="box kpi"><div class="muted">الصافي</div><div class="v">${money(totalsMoves.net)}</div></div>
-          ${cardTypeId !== "all" ? `<div class="box kpi"><div class="muted">الرصيد الحالي</div><div class="v">${money(
-            selectedBalanceNow
-          )}</div></div>` : ""}
+          ${cardTypeId !== "all" ? `<div class="box kpi"><div class="muted">الرصيد الحالي</div><div class="v">${money(selectedBalanceNow)}</div></div>` : ""}
         </div>
-
         <table>
-          <thead>
-            <tr><th>#</th><th>التاريخ</th><th>الكرت</th><th>الحركة</th><th>المصدر</th><th>فاتورة</th><th>العميل</th><th>الكمية</th><th>قبل</th><th>بعد</th><th>ملاحظة</th></tr>
-          </thead>
-          <tbody>
-            ${htmlRows || `<tr><td colspan="11" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}
-          </tbody>
+          <thead><tr><th>#</th><th>التاريخ</th><th>الكرت</th><th>الحركة</th><th>المصدر</th><th>فاتورة</th><th>العميل</th><th>الكمية</th><th>قبل</th><th>بعد</th><th>ملاحظة</th></tr></thead>
+          <tbody>${htmlRows || `<tr><td colspan="11" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}</tbody>
         </table>
-
         <script>setTimeout(()=>window.print(), 250);</script>
       </body>
       </html>
@@ -1057,9 +894,7 @@ window.print();
 
     const htmlRows = rows
       .map((r, idx) => {
-        return `
-          <tr><td>${idx + 1}</td><td>${escapeHtml(r.card_name)}</td><td>${escapeHtml(r.card_type_id)}</td><td style="font-weight:800">${escapeHtml(money(r.balance_now))}</td><td>${escapeHtml(money(r.inQty))}</td><td>${escapeHtml(money(r.outQty))}</td><td>${escapeHtml(money(r.net))}</td><td>${escapeHtml(r.moves)}</td></tr>
-        `;
+        return `<tr><td>${idx + 1}</td><td>${escapeHtml(r.card_name)}</td><td>${escapeHtml(r.card_type_id)}</td><td style="font-weight:800">${escapeHtml(money(r.balance_now))}</td><td>${escapeHtml(money(r.inQty))}</td><td>${escapeHtml(money(r.outQty))}</td><td>${escapeHtml(money(r.net))}</td><td>${escapeHtml(r.moves)}</td></tr>`;
       })
       .join("");
 
@@ -1068,36 +903,22 @@ window.print();
 
     w.document.write(`
       <html lang="ar" dir="rtl">
-      <head>
-        <meta charset="UTF-8" />
-        <title>تقرير حركة الأصناف + الرصيد</title>
-        <style>${basePrintCss()}</style>
-      </head>
+      <head><meta charset="UTF-8" /><title>تقرير حركة الأصناف + الرصيد</title><style>${basePrintCss()}</style></head>
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
-              hdr.name
-            )} — تقرير حركة الأصناف + الرصيد</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — تقرير حركة الأصناف + الرصيد</div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
-            <div class="sub">يعرض: الرصيد الحالي + إجمالي IN/OUT خلال الفترة</div>
           </div>
           <div class="box">
             <div class="sub">هاتف: ${escapeHtml(hdr.phone)}</div>
             <div class="sub">عنوان: ${escapeHtml(hdr.address)}</div>
-            <div class="sub">وقت الطباعة: ${escapeHtml(new Date().toLocaleString("ar-EG"))}</div>
           </div>
         </div>
-
         <table>
-          <thead>
-            <tr><th>#</th><th>الصنف</th><th>ID</th><th>الرصيد الحالي</th><th>IN</th><th>OUT</th><th>الصافي</th><th>عدد الحركات</th></tr>
-          </thead>
-          <tbody>
-            ${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}
-          </tbody>
+          <thead><tr><th>#</th><th>الصنف</th><th>ID</th><th>الرصيد الحالي</th><th>IN</th><th>OUT</th><th>الصافي</th><th>عدد الحركات</th></tr></thead>
+          <tbody>${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}</tbody>
         </table>
-
         <script>setTimeout(()=>window.print(), 250);</script>
       </body>
       </html>
@@ -1111,13 +932,10 @@ window.print();
     if (!cust) return alert("اختر عميل");
 
     const rows = ledgerFiltered || [];
-
     const htmlRows = rows
       .map((r, idx) => {
         const isDetail = !!r.is_detail;
-        return `
-          <tr style="${isDetail ? "opacity:0.85;" : ""}"><td>${idx + 1}</td><td>${escapeHtml(fmtDate(r.created_at))}</td><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.ref || "-")}</td><td>${isDetail ? "" : escapeHtml(money(r.debit))}</td><td>${isDetail ? "" : escapeHtml(money(r.credit))}</td><td>${isDetail ? "" : escapeHtml(money(r.running))}</td><td>${escapeHtml(r.note || "-")}</td></tr>
-        `;
+        return `<tr style="${isDetail ? "opacity:0.85;" : ""}"><td>${idx + 1}</td><td>${escapeHtml(fmtDate(r.created_at))}</td><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.ref || "-")}</td><td>${isDetail ? "" : escapeHtml(money(r.debit))}</td><td>${isDetail ? "" : escapeHtml(money(r.credit))}</td><td>${isDetail ? "" : escapeHtml(money(r.running))}</td><td>${escapeHtml(r.note || "-")}</td></tr>`;
       })
       .join("");
 
@@ -1126,45 +944,29 @@ window.print();
 
     w.document.write(`
       <html lang="ar" dir="rtl">
-      <head>
-        <meta charset="UTF-8" />
-        <title>كشف حساب عميل</title>
-        <style>${basePrintCss()}</style>
-      </head>
+      <head><meta charset="UTF-8" /><title>كشف حساب عميل</title><style>${basePrintCss()}</style></head>
       <body>
         <div class="head">
           <div class="box">
-            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(
-              hdr.name
-            )} — كشف حساب عميل</div>
+            <div class="title">${hdr.logo ? `<img src="${hdr.logo}" style="height:54px;object-fit:contain" />` : ""}${escapeHtml(hdr.name)} — كشف حساب عميل</div>
             <div class="sub">العميل: <b>${escapeHtml(cust.name || "-")}</b></div>
             <div class="sub">من: ${escapeHtml(from)} | إلى: ${escapeHtml(to)}</div>
-            <div class="sub">${ledgerUsingView ? "المصدر: View v_customer_ledger" : "المصدر: invoices + payments"}</div>
-            <div class="sub">الوضع: ${ledgerDetailed ? "مفصل" : "مختصر"}</div>
           </div>
           <div class="box">
             <div class="sub">هاتف: ${escapeHtml(hdr.phone)}</div>
             <div class="sub">عنوان: ${escapeHtml(hdr.address)}</div>
-            <div class="sub">وقت الطباعة: ${escapeHtml(new Date().toLocaleString("ar-EG"))}</div>
           </div>
         </div>
-
         <div class="sum">
           <div class="box kpi"><div class="muted">افتتاحي</div><div class="v">${money(ledgerSummary.opening)}</div></div>
           <div class="box kpi"><div class="muted">مدين</div><div class="v">${money(ledgerSummary.debit)}</div></div>
           <div class="box kpi"><div class="muted">دائن</div><div class="v">${money(ledgerSummary.credit)}</div></div>
           <div class="box kpi"><div class="muted">ختامي</div><div class="v">${money(ledgerSummary.closing)}</div></div>
         </div>
-
         <table>
-          <thead>
-            <tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr>
-          </thead>
-          <tbody>
-            ${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}
-          </tbody>
+          <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr></thead>
+          <tbody>${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}</tbody>
         </table>
-
         <script>setTimeout(()=>window.print(), 250);</script>
       </body>
       </html>
@@ -1172,7 +974,6 @@ window.print();
     w.document.close();
   }
 
-  // ===================== init =====================
   useEffect(() => {
     (async () => {
       try {
@@ -1186,10 +987,8 @@ window.print();
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===================== UI =====================
   return (
     <div className="page">
       <div className="page-head">
@@ -1200,6 +999,7 @@ window.print();
             {tab === "cardMoves" && <>حركة الكروت تشمل IN/OUT (ومن الفواتير أيضاً). {usingView ? "✅ View" : "ℹ️ Table"}.</>}
             {tab === "itemMoves" && <>حركة صنف + الرصيد الحالي (من card_types) مع إجمالي IN/OUT خلال الفترة.</>}
             {tab === "customerLedger" && <>كشف حساب عميل (مختصر/مفصل) مع طباعة بنفس ستايل الفواتير.</>}
+            {tab === "customerDebts" && <>تقرير ديون العملاء الإداري الشامل، مع الملخصات والمؤشرات العامة والتواريخ.</>}
             {tab === "giga" && <>تقرير الجيجا (قراءات/استهلاك/سعر) خلال فترة، مع طباعة.</>}
           </div>
         </div>
@@ -1214,35 +1014,24 @@ window.print();
           <button className={"btn " + (tab === "customerLedger" ? "" : "btn-outline")} onClick={() => setTab("customerLedger")}>
             كشف حساب عميل
           </button>
-          <button
-  className={"btn " + (tab === "customerDebts" ? "" : "btn-outline")}
-  onClick={() => setTab("customerDebts")}
->
-  ديون العملاء
-</button>
+          <button className={"btn " + (tab === "customerDebts" ? "" : "btn-outline")} onClick={() => setTab("customerDebts")}>
+            ديون العملاء
+          </button>
           <button className={"btn " + (tab === "giga" ? "" : "btn-outline")} onClick={() => setTab("giga")}>
             تقرير الجيجا
           </button>
 
           {tab === "cardMoves" && (
             <>
-              <button className="btn btn-outline" onClick={loadMovements} disabled={loading}>
-                تحديث
-              </button>
-              <button className="btn" onClick={printCardMoves} disabled={loading}>
-                طباعة
-              </button>
+              <button className="btn btn-outline" onClick={loadMovements} disabled={loading}>تحديث</button>
+              <button className="btn" onClick={printCardMoves} disabled={loading}>طباعة</button>
             </>
           )}
 
           {tab === "itemMoves" && (
             <>
-              <button className="btn btn-outline" onClick={loadMovements} disabled={loading}>
-                تحديث
-              </button>
-              <button className="btn" onClick={printItemMovesSummary} disabled={loading}>
-                طباعة
-              </button>
+              <button className="btn btn-outline" onClick={loadMovements} disabled={loading}>تحديث</button>
+              <button className="btn" onClick={printItemMovesSummary} disabled={loading}>طباعة</button>
             </>
           )}
 
@@ -1252,199 +1041,208 @@ window.print();
                 <input type="checkbox" checked={ledgerDetailed} onChange={(e) => setLedgerDetailed(e.target.checked)} />
                 مفصل
               </label>
-
-              <button className="btn btn-outline" onClick={loadCustomerLedger} disabled={ledgerLoading || !custId}>
-                تحديث
-              </button>
-              <button className="btn" onClick={printCustomerLedger} disabled={ledgerLoading || !custId}>
-                طباعة
-              </button>
+              <button className="btn btn-outline" onClick={loadCustomerLedger} disabled={ledgerLoading || !custId}>تحديث</button>
+              <button className="btn" onClick={printCustomerLedger} disabled={ledgerLoading || !custId}>طباعة</button>
             </>
           )}
+
           {tab === "customerDebts" && (
-<>
-  <div className="card">
-    <div style={{display:"flex",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-      <button
-        className="btn"
-        onClick={loadCustomerDebts}
-        disabled={debtsLoading}
-      >
-        {debtsLoading ? "جاري التحميل..." : "تحديث"}
-      </button>
-      <button
-  className="btn btn-outline"
-  onClick={printCustomerDebts}
-  disabled={!customerDebts.length}
->
-  طباعة
-</button>
-
-      <input
-        className="input"
-        placeholder="بحث باسم العميل..."
-        value={debtSearch}
-        onChange={(e)=>setDebtSearch(e.target.value)}
-        style={{maxWidth:300}}
-      />
-    </div>
-
-    <table className="table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>العميل</th>
-          <th>الرصيد الافتتاحي</th>
-          <th>إجمالي الفواتير</th>
-          <th>إجمالي السداد</th>
-          <th>المتبقي</th>
-        </tr>
-      </thead>
-
-      <tbody>
-{customerDebts
-  .filter(c =>
-    c.name?.toLowerCase().includes(debtSearch.toLowerCase())
-  )
-  .map((c, i) => (
-    <tr key={c.id}>
-      <td>{i + 1}</td>
-      <td>{c.name}</td>
-      <td>{money(c.opening)}</td>
-      <td>{money(c.invoices)}</td>
-      <td>{money(c.payments)}</td>
-      <td>
-        <b style={{ color: "red" }}>
-          {money(c.balance)}
-        </b>
-      </td>
-    </tr>
-))}
-</tbody>
-    </table>
-  </div>
-</>
-)}
+            <>
+              <button className="btn" onClick={loadCustomerDebts} disabled={debtsLoading}>
+                {debtsLoading ? "جاري التحميل..." : "تحديث"}
+              </button>
+              <button className="btn btn-outline" onClick={printCustomerDebts} disabled={!customerDebts.length}>
+                طباعة
+              </button>
+              <input
+                className="input"
+                placeholder="بحث باسم العميل..."
+                value={debtSearch}
+                onChange={(e) => setDebtSearch(e.target.value)}
+                style={{ maxWidth: 300 }}
+              />
+            </>
+          )}
 
           {tab === "giga" && (
             <>
               <select className="input" style={{ minWidth: 220 }} value={gigaCustomerId} onChange={(e) => setGigaCustomerId(e.target.value)}>
                 <option value="all">كل عملاء الجيجا</option>
                 {(customers || []).filter((c) => String(c.type || "") === "giga").map((c) => (
-                  <option key={c.id} value={String(c.id)}>
-                    {c.name}
-                  </option>
+                  <option key={c.id} value={String(c.id)}>{c.name}</option>
                 ))}
               </select>
-
               <input className="input" style={{ minWidth: 220 }} placeholder="بحث (اسم العميل أو رقم الفاتورة)" value={gigaQ} onChange={(e) => setGigaQ(e.target.value)} />
-
-              <button className="btn btn-outline" onClick={loadGigaReport} disabled={gigaLoading}>
-                تحديث
-              </button>
-              <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaFilteredRows || []).length}>
-                طباعة
-              </button>
+              <button className="btn btn-outline" onClick={loadGigaReport} disabled={gigaLoading}>تحديث</button>
+              <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaFilteredRows || []).length}>طباعة</button>
             </>
           )}
         </div>
       </div>
+
+      {/* =============== ديون العملاء (v1 - المرحلة الثانية) =============== */}
+      {tab === "customerDebts" && (
+        <div style={{ width: "100%", marginTop: "15px" }}>
+          {/* بطاقات الملخص الإداري الأربعة */}
+          <div style={{ display: "flex", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
+            <div style={{ flex: "1", minWidth: "220px", background: "#fff5f5", borderRight: "5px solid #e53e3e", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>💰 إجمالي الديون القائمة</div>
+              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#e53e3e", marginTop: "5px" }}>
+                {money(customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0))} <span style={{ fontSize: "12px" }}>ريال</span>
+              </div>
+            </div>
+
+            <div style={{ flex: "1", minWidth: "220px", background: "#f0fff4", borderRight: "5px solid #38a169", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 العملاء المدينون</div>
+              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#38a169", marginTop: "5px" }}>
+                {customerDebts.filter((r) => r.balance > 0).length} <span style={{ fontSize: "12px" }}>عميل</span>
+              </div>
+            </div>
+
+            <div style={{ flex: "1", minWidth: "220px", background: "#ebf8ff", borderRight: "5px solid #3182ce", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📄 إجمالي فواتير الآجل</div>
+              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#3182ce", marginTop: "5px" }}>
+                {customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)} <span style={{ fontSize: "12px" }}>فاتورة</span>
+              </div>
+            </div>
+
+            <div style={{ flex: "1", minWidth: "220px", background: "#fffaf0", borderRight: "5px solid #dd6b20", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط دين العميل</div>
+              <div style={{ fontSize: "22px", fontWeight: "bold", color: "#dd6b20", marginTop: "5px" }}>
+                {money(
+                  customerDebts.filter((r) => r.balance > 0).length > 0
+                    ? customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0) / customerDebts.filter((r) => r.balance > 0).length
+                    : 0
+                )} <span style={{ fontSize: "12px" }}>ريال</span>
+              </div>
+            </div>
+          </div>
+
+          {/* الجدول المحدث */}
+          <div className="card">
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>العميل</th>
+                    <th>الرصيد الافتتاحي</th>
+                    <th>إجمالي الفواتير</th>
+                    <th>إجمالي السداد</th>
+                    <th>المتبقي (الدين)</th>
+                    <th>عدد الفواتير</th>
+                    <th>آخر فاتورة</th>
+                    <th>آخر سداد</th>
+                    <th>خيارات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerDebts.length === 0 ? (
+                    <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--muted)" }}>اضغط على تحديث لجلب التقارير</td></tr>
+                  ) : (
+                    customerDebts
+                      .filter((c) => c.name?.toLowerCase().includes(debtSearch.toLowerCase()))
+                      .map((c, i) => (
+                        <tr key={c.id}>
+                          <td>{i + 1}</td>
+                          <td><strong>{c.name}</strong></td>
+                          <td>{money(c.opening)}</td>
+                          <td>{money(c.invoices)}</td>
+                          <td>{money(c.payments)}</td>
+                          <td><b style={{ color: "red" }}>{money(c.balance)}</b></td>
+                          <td>{c.invoiceCount}</td>
+                          <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastInvoice}</span></td>
+                          <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastPayment}</span></td>
+                          <td>
+                            <button
+                              className="btn btn-outline"
+                              onClick={() => {
+                                setCustId(String(c.id));
+                                setTab("customerLedger");
+                                setTimeout(() => loadCustomerLedger(), 100);
+                              }}
+                              style={{ padding: "3px 10px", fontSize: "12px", minHeight: "auto" }}
+                            >
+                              📄 كشف الحساب
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                  {customerDebts.length > 0 && (
+                    <tr style={{ fontWeight: "bold", background: "var(--border-color)", borderTop: "2px solid #aaa" }}>
+                      <td colSpan="2">الإجمالي العام</td>
+                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.opening || 0), 0))}</td>
+                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.invoices || 0), 0))}</td>
+                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.payments || 0), 0))}</td>
+                      <td style={{ color: "red" }}>{money(customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0))}</td>
+                      <td>{customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)}</td>
+                      <td>-</td>
+                      <td>-</td>
+                      <td>-</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* =============== حركة الكروت =============== */}
       {tab === "cardMoves" && (
         <>
           <div className="card no-print" style={{ marginBottom: 12 }}>
             <div className="grid4">
-              <label>
-                من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-
-              <label>
-                نوع الحركة
+              <label>من<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label>إلى<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+              <label>نوع الحركة
                 <select className="input" value={mType} onChange={(e) => setMType(e.target.value)}>
                   <option value="all">الكل</option>
                   <option value="IN">إدخال (IN)</option>
                   <option value="OUT">إخراج (OUT)</option>
                 </select>
               </label>
-
-              <label>
-                نوع الكرت
+              <label>نوع الكرت
                 <select className="input" value={cardTypeId} onChange={(e) => setCardTypeId(e.target.value)}>
                   <option value="all">الكل</option>
-                  {(cardTypes || []).map((ct) => (
-                    <option key={ct.id} value={ct.id}>
-                      {ct.name}
-                    </option>
-                  ))}
+                  {(cardTypes || []).map((ct) => (<option key={ct.id} value={ct.id}>{ct.name}</option>))}
                 </select>
               </label>
             </div>
-
             <div className="grid2" style={{ marginTop: 10 }}>
-              <label>
-                بحث
+              <label>بحث
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="اسم الكرت / فاتورة / عميل / ملاحظة / رقم الحركة" />
-                  <button type="button" className="btn btn-outline" onClick={() => setQ("")} style={{ whiteSpace: "nowrap" }}>
-                    مسح
-                  </button>
+                  <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="اسم الكرت / فاتورة / عميل / ملاحظة" />
+                  <button type="button" className="btn btn-outline" onClick={() => setQ("")}>مسح</button>
                 </div>
               </label>
-
               <div style={{ display: "flex", gap: 10, alignItems: "flex-end", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي IN</div>
-                  <div className="mini-value">{money(totalsMoves.inQty)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي OUT</div>
-                  <div className="mini-value">{money(totalsMoves.outQty)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">الصافي</div>
-                  <div className="mini-value">{money(totalsMoves.net)}</div>
-                </div>
-                {cardTypeId !== "all" && (
-                  <div className="mini-card">
-                    <div className="mini-title">الرصيد الحالي</div>
-                    <div className="mini-value">{money(selectedBalanceNow)}</div>
-                  </div>
-                )}
+                <div className="mini-card"><div className="mini-title">إجمالي IN</div><div className="mini-value">{money(totalsMoves.inQty)}</div></div>
+                <div className="mini-card"><div className="mini-title">إجمالي OUT</div><div className="mini-value">{money(totalsMoves.outQty)}</div></div>
+                <div className="mini-card"><div className="mini-title">الصافي</div><div className="mini-value">{money(totalsMoves.net)}</div></div>
+                {cardTypeId !== "all" && (<div className="mini-card"><div className="mini-title">الرصيد الحالي</div><div className="mini-value">{money(selectedBalanceNow)}</div></div>)}
               </div>
             </div>
           </div>
-
           <div className="card">
             <div className="table-wrap">
               <table className="table">
-                <thead>
-                  <tr><th>#</th><th>التاريخ</th><th>الكرت</th><th>الحركة</th><th>المصدر</th><th>فاتورة</th><th>العميل</th><th>الكمية</th><th>قبل</th><th>بعد</th><th>ملاحظة</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>التاريخ</th><th>الكرت</th><th>الحركة</th><th>المصدر</th><th>فاتورة</th><th>العميل</th><th>الكمية</th><th>قبل</th><th>بعد</th><th>ملاحظة</th></tr></thead>
                 <tbody>
                   {(filteredMoves || []).length === 0 ? (
-                    <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        لا توجد حركات
-                      </td></tr>
+                    <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد حركات</td></tr>
                   ) : (
                     (filteredMoves || []).map((r, idx) => {
                       const isIn = String(r.movement_type) === "IN";
                       return (
-                        <tr key={r.id}><td>{idx + 1}</td><td>{fmtDate(r.created_at)}</td><td>{r.card_name}</td><td>
-                            <span className={"pill " + (isIn ? "pill-in" : "pill-out")}>{isIn ? "IN" : "OUT"}</span>
-                          </td><td>{r.source}</td><td>{r.invoice_no}</td><td>{r.customer_name}</td><td style={{ fontWeight: 900 }}>{r.qty}</td><td>{r.before_qty}</td><td>{r.after_qty}</td><td style={{ maxWidth: 320, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.note || "-"}</td></tr>
+                        <tr key={r.id}><td>{idx + 1}</td><td>{fmtDate(r.created_at)}</td><td>{r.card_name}</td><td><span className={"pill " + (isIn ? "pill-in" : "pill-out")}>{isIn ? "IN" : "OUT"}</span></td><td>{r.source}</td><td>{r.invoice_no}</td><td>{r.customer_name}</td><td style={{ fontWeight: 900 }}>{r.qty}</td><td>{r.before_qty}</td><td>{r.after_qty}</td><td style={{ maxWidth: 320, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.note || "-"}</td></tr>
                       );
                     })
                   )}
                 </tbody>
               </table>
             </div>
-
             {loading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
           </div>
         </>
@@ -1455,42 +1253,21 @@ window.print();
         <>
           <div className="card no-print" style={{ marginBottom: 12 }}>
             <div className="grid4">
-              <label>
-                من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-
-              <label>
-                بحث صنف
-                <input className="input" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="ابحث بالصنف..." />
-              </label>
-
+              <label>من<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label>إلى<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+              <label>بحث صنف<input className="input" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="ابحث بالصنف..." /></label>
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={itemOnlyWithMoves} onChange={(e) => setItemOnlyWithMoves(e.target.checked)} />
-                إظهار الأصناف التي لها حركة فقط
+                <input type="checkbox" checked={itemOnlyWithMoves} onChange={(e) => setItemOnlyWithMoves(e.target.checked)} />إظهار الأصناف التي لها حركة فقط
               </label>
-            </div>
-
-            <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 12 }}>
-              ملاحظة: الرصيد الحالي يتم قراءته من جدول <b>card_types</b> (عمود qty/current_qty/stock_qty... حسب الموجود عندك).
             </div>
           </div>
-
           <div className="card">
             <div className="table-wrap">
               <table className="table">
-                <thead>
-                  <tr><th>#</th><th>الصنف</th><th>ID</th><th>الرصيد الحالي</th><th>IN</th><th>OUT</th><th>الصافي</th><th>عدد الحركات</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>الصنف</th><th>ID</th><th>الرصيد الحالي</th><th>IN</th><th>OUT</th><th>الصافي</th><th>عدد الحركات</th></tr></thead>
                 <tbody>
                   {(itemSummaryRows || []).length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        لا توجد بيانات
-                      </td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات</td></tr>
                   ) : (
                     (itemSummaryRows || []).map((r, idx) => (
                       <tr key={String(r.card_type_id) + "_" + idx}><td>{idx + 1}</td><td>{r.card_name}</td><td>{r.card_type_id}</td><td style={{ fontWeight: 900 }}>{money(r.balance_now)}</td><td>{money(r.inQty)}</td><td>{money(r.outQty)}</td><td>{money(r.net)}</td><td>{r.moves}</td></tr>
@@ -1499,7 +1276,6 @@ window.print();
                 </tbody>
               </table>
             </div>
-
             {loading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
           </div>
         </>
@@ -1510,92 +1286,42 @@ window.print();
         <>
           <div className="card no-print" style={{ marginBottom: 12 }}>
             <div className="grid4">
-              <label>
-                من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-
-              <label>
-                العميل *
+              <label>من<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label>إلى<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+              <label>العميل *
                 <select className="input" value={custId} onChange={(e) => setCustId(e.target.value)}>
                   <option value="">اختر عميل...</option>
-                  {(customers || []).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                  {(customers || []).map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
               </label>
-
-              <label>
-                بحث
-                <input className="input" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نوع/مرجع/ملاحظة..." />
-              </label>
+              <label>بحث<input className="input" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نوع/مرجع/ملاحظة..." /></label>
             </div>
-
             <div className="grid2" style={{ marginTop: 10 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                <div className="mini-card">
-                  <div className="mini-title">افتتاحي</div>
-                  <div className="mini-value">{money(ledgerSummary.opening)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">مدين</div>
-                  <div className="mini-value">{money(ledgerSummary.debit)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">دائن</div>
-                  <div className="mini-value">{money(ledgerSummary.credit)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">ختامي</div>
-                  <div className="mini-value">{money(ledgerSummary.closing)}</div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-end" }}>
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                  {ledgerUsingView ? "✅ View v_customer_ledger" : "ℹ️ invoices + payments"} — {ledgerDetailed ? "مفصل" : "مختصر"}
-                </div>
+                <div className="mini-card"><div className="mini-title">افتتاحي</div><div className="mini-value">{money(ledgerSummary.opening)}</div></div>
+                <div className="mini-card"><div className="mini-title">مدين</div><div className="mini-value">{money(ledgerSummary.debit)}</div></div>
+                <div className="mini-card"><div className="mini-title">دائن</div><div className="mini-value">{money(ledgerSummary.credit)}</div></div>
+                <div className="mini-card"><div className="mini-title">ختامي</div><div className="mini-value">{money(ledgerSummary.closing)}</div></div>
               </div>
             </div>
-
-            {selectedCustomer && (
-              <div style={{ marginTop: 10, color: "var(--muted)", fontSize: 12 }}>
-                العميل: <b style={{ color: "var(--text)" }}>{selectedCustomer.name}</b> — الافتتاحي:
-                <b style={{ color: "var(--text)" }}>{money(selectedCustomer.opening_balance)}</b>
-              </div>
-            )}
           </div>
-
           <div className="card">
             <div className="table-wrap">
               <table className="table">
-                <thead>
-                  <tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr></thead>
                 <tbody>
                   {!custId ? (
-                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        اختر عميل ثم اضغط (تحديث)
-                      </td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>اختر عميل ثم اضغط (تحديث)</td></tr>
                   ) : (ledgerFiltered || []).length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        لا توجد بيانات
-                      </td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات</td></tr>
                   ) : (
                     (ledgerFiltered || []).map((r, idx) => (
-                      <tr key={idx} style={r.is_detail ? { opacity: 0.85 } : undefined}><td>{idx + 1}</td><td>{fmtDate(r.created_at)}</td><td style={r.is_detail ? { color: "var(--muted)" } : undefined}>{r.kind}</td><td>{r.ref || "-"}</td><td>{r.is_detail ? "" : money(r.debit)}</td><td>{r.is_detail ? "" : money(r.credit)}</td><td>{r.is_detail ? "" : money(r.running)}</td><td style={{ maxWidth: 420, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.note || "-"}</td></tr>
+                      <tr key={idx} style={r.is_detail ? { opacity: 0.85 } : undefined}><td>{idx + 1}</td><td>{fmtDate(r.created_at)}</td><td>{r.kind}</td><td>{r.ref || "-"}</td><td>{r.is_detail ? "" : money(r.debit)}</td><td>{r.is_detail ? "" : money(r.credit)}</td><td>{r.is_detail ? "" : money(r.running)}</td><td style={{ maxWidth: 420, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.note || "-"}</td></tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
-
             {ledgerLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
           </div>
         </>
@@ -1606,75 +1332,26 @@ window.print();
         <>
           <div className="card no-print" style={{ marginBottom: 12 }}>
             <div className="grid4">
-              <label>
-                من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-
-              <label>
-                العميل
+              <label>من<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+              <label>إلى<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+              <label>العميل
                 <select className="input" value={gigaCustomerId} onChange={(e) => setGigaCustomerId(e.target.value)}>
                   <option value="all">كل عملاء الجيجا</option>
                   {(customers || []).filter((c) => String(c.type || "") === "giga").map((c) => (
-                    <option key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </option>
+                    <option key={c.id} value={String(c.id)}>{c.name}</option>
                   ))}
                 </select>
               </label>
-
-              <label>
-                بحث
-                <input className="input" value={gigaQ} onChange={(e) => setGigaQ(e.target.value)} placeholder="اسم العميل أو رقم الفاتورة..." />
-              </label>
-            </div>
-
-            <div className="grid2" style={{ marginTop: 10 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                <div className="mini-card">
-                  <div className="mini-title">عدد الفواتير</div>
-                  <div className="mini-value">{gigaSummary.invoices}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">عدد العملاء</div>
-                  <div className="mini-value">{gigaSummary.customers}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي GB</div>
-                  <div className="mini-value">{money(gigaSummary.usage)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي المبلغ</div>
-                  <div className="mini-value">{money(gigaSummary.amount)}</div>
-                </div>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "flex-end", gap: 8 }}>
-                <button className="btn btn-outline" onClick={loadGigaReport} disabled={gigaLoading}>
-                  تحديث
-                </button>
-                <button className="btn" onClick={printGigaReport} disabled={gigaLoading || !(gigaFilteredRows || []).length}>
-                  طباعة
-                </button>
-              </div>
+              <label>بحث<input className="input" value={gigaQ} onChange={(e) => setGigaQ(e.target.value)} placeholder="اسم العميل أو رقم الفاتورة..." /></label>
             </div>
           </div>
-
           <div className="card">
             <div className="table-wrap">
               <table className="table">
-                <thead>
-                  <tr><th>#</th><th>التاريخ</th><th>العميل</th><th>فاتورة</th><th>قراءة سابقة</th><th>قراءة حالية</th><th>استهلاك</th><th>سعر الجيجا</th><th>الإجمالي</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>التاريخ</th><th>العميل</th><th>فاتورة</th><th>قراءة سابقة</th><th>قراءة حالية</th><th>استهلاك</th><th>سعر الجيجا</th><th>الإجمالي</th></tr></thead>
                 <tbody>
                   {(gigaFilteredRows || []).length === 0 ? (
-                    <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        لا توجد بيانات
-                      </td></tr>
+                    <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات</td></tr>
                   ) : (
                     gigaFilteredRows.map((r, idx) => (
                       <tr key={r.key || idx}><td>{idx + 1}</td><td>{r.invoice_date}</td><td>{r.customer_name}</td><td>{r.invoice_id}</td><td>{r.prev_reading_gb}</td><td>{r.curr_reading_gb}</td><td style={{ fontWeight: 900 }}>{r.usage_gb}</td><td>{money(r.price_per_gb)}</td><td style={{ fontWeight: 900 }}>{money(r.line_total)}</td></tr>
@@ -1683,7 +1360,6 @@ window.print();
                 </tbody>
               </table>
             </div>
-
             {gigaLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
           </div>
         </>
