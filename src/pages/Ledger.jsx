@@ -32,16 +32,28 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// دالة بناء الرصيد المتصاعد المحسنة هندسياً وحسابياً
 function buildRunning(rows, opening = 0) {
-  let run = safeNum(opening);
+  // 1. فرز الحركات من الأقدم إلى الأحدث للحساب التراكمي الصحيح
+  const sorted = [...(rows || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  
+  let currentRun = safeNum(opening);
   const out = [];
-  for (const r of rows || []) {
-    const debit = safeNum(r.debit);
-    const credit = safeNum(r.credit);
-    run = run + debit - credit;
-    out.push({ ...r, running: run });
+
+  for (const r of sorted) {
+    if (r.is_detail) {
+      // تفاصيل بنود الفواتير لا تؤثر على حركة الرصيد الإجمالي بشكل مستقل
+      out.push({ ...r, running: currentRun });
+    } else {
+      const debit = safeNum(r.debit);
+      const credit = safeNum(r.credit);
+      currentRun = currentRun + debit - credit;
+      out.push({ ...r, running: currentRun });
+    }
   }
-  return out;
+
+  // 2. إعادة إرجاع البيانات بوضع (الأحدث أولاً) لتسهيل القراءة في العرض والطباعة
+  return out.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
 
 function getCardBalanceFromRow(row) {
@@ -366,7 +378,7 @@ export default function Ledger() {
           ref: r.ref,
           debit: 0,
           credit: 0,
-          note: `${ln.item} | qty=${safeNum(ln.qty)} | price=${money(ln.price)} | total=${money(ln.total)}` + (ln.note ? ` | ${ln.note}` : ""),
+          note: `${ln.item} | الكمية=${safeNum(ln.qty)} | السعر=${money(ln.price)} | الإجمالي=${money(ln.total)}` + (ln.note ? ` | ${ln.note}` : ""),
           invoice_id: invId,
           is_detail: true,
         });
@@ -389,7 +401,7 @@ export default function Ledger() {
       const opening = safeNum(cust?.opening_balance);
 
       try {
-        const { data, error } = await supabase
+        const { data, error = null } = await supabase
           .from("v_customer_ledger")
           .select("*")
           .eq("customer_id", cid)
@@ -493,7 +505,7 @@ export default function Ledger() {
     }
   }
 
-  // ===================== Customer Debts (v1 & Aging & WhatsApp Implementation) =====================
+  // ===================== Customer Debts =====================
   async function loadCustomerDebts() {
     setDebtsLoading(true);
     try {
@@ -531,17 +543,23 @@ export default function Ledger() {
           ? cPayments.sort((a, b) => new Date(b.pay_date) - new Date(a.pay_date))[0].pay_date.slice(0, 10)
           : "-";
 
-        // تحديد فئة خطورة عمر الدين (Aging Class)
-        let agingStatus = "safe"; // آمن
+        // حساب فئات خطورة عمر الدين المخصصة: 15 حرج / 5 أيام متوسط / يومين تمام
+        let agingStatus = "safe"; 
         const effectiveDateStr = lastPayment !== "-" ? lastPayment : (lastInvoice !== "-" ? lastInvoice : null);
         
         if (balance > 0 && effectiveDateStr) {
           const diffTime = Math.abs(new Date() - new Date(effectiveDateStr));
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          if (diffDays > 60) agingStatus = "critical"; // حرجة جداً
-          else if (diffDays > 30) agingStatus = "warning"; // متوسطة الخطورة
+          
+          if (diffDays > 15) {
+            agingStatus = "critical"; 
+          } else if (diffDays > 5) {
+            agingStatus = "warning";  
+          } else {
+            agingStatus = "safe";     
+          }
         } else if (balance > 0 && !effectiveDateStr) {
-          agingStatus = "critical"; // دين قديم معلق بلا حركات
+          agingStatus = "critical"; 
         }
 
         return {
@@ -568,7 +586,6 @@ export default function Ledger() {
     }
   }
 
-  // فلترة قائمة الديون بناءً على تصنيف عمر الدين وبحث الاسم
   const finalFilteredDebts = useMemo(() => {
     return customerDebts.filter((c) => {
       const matchSearch = c.name?.toLowerCase().includes(debtSearch.toLowerCase());
@@ -577,7 +594,6 @@ export default function Ledger() {
     });
   }, [customerDebts, debtSearch, agingFilter]);
 
-  // دالة إرسال التذكير الآلي عبر الواتساب
   function sendWhatsAppReminder(customer) {
     if (!customer.phone) {
       alert("عذراً، لا يوجد رقم هاتف مسجل لهذا العميل لإرسال تذكير.");
@@ -585,25 +601,22 @@ export default function Ledger() {
     }
     const msg = `السلام عليكم ورحمة الله وبركاته، أخي العزيز ${customer.name}. نود تذكيركم بأن صافي الرصيد المستحق والمتبقي في حسابكم لدينا هو: ${money(customer.balance)} ريال. شاكرين ومقدرين لكم حسن تعاونكم الدائم معنا.`;
     const encodedMsg = encodeURIComponent(msg);
-    // تنظيف رقم الهاتف وإزالة الرموز
     const cleanPhone = customer.phone.replace(/[^0-9]/g, "");
     window.open(`https://wa.me/${cleanPhone}?text=${encodedMsg}`, "_blank");
   }
 
-  // دالة تصدير تقرير الديون الحالي إلى ملف Excel (CSV)
   function exportDebtsToCSV() {
     if (!finalFilteredDebts.length) {
       alert("لا توجد بيانات متاحة للتصدير حالياً.");
       return;
     }
-
-    let csvContent = "\uFEFF"; // إضافة BOM لدعم اللغة العربية في إكسل دون مشاكل ترميز
-    csvContent += "#,اسم العميل,الرصيد الافتتاحي,إجمالي الفواتير,إجمالي السداد,الرصيد المتبقي,عدد الفواتير,تاريخ آخر فاتورة,تاريخ آخر سداد,حالة خطورة الدين\n";
+    let csvContent = "\uFEFF"; 
+    csvContent += "#,اسم العميل,الرصيد الافتتاحي,إجمالي الفواتير,إجمالي السداد,الرصيد المتبقي,عدد الفواتير,تاريخ آخر فاتورة,تاريخ آخر سداد,تصنيف الدين\n";
 
     finalFilteredDebts.forEach((r, idx) => {
-      let statusText = "آمن مستقر";
-      if (r.agingStatus === "critical") statusText = "حرج (متأخر جداً)";
-      else if (r.agingStatus === "warning") statusText = "متوسط الخطورة";
+      let statusText = "تمام ومستقر";
+      if (r.agingStatus === "critical") statusText = "حرج (>15 يوم)";
+      else if (r.agingStatus === "warning") statusText = "متوسط (>5 أيام)";
 
       csvContent += `${idx + 1},"${r.name}",${r.opening.toFixed(2)},${r.invoices.toFixed(2)},${r.payments.toFixed(2)},${r.balance.toFixed(2)},${r.invoiceCount},${r.lastInvoice},${r.lastPayment},"${statusText}"\n`;
     });
@@ -612,7 +625,7 @@ export default function Ledger() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `تقرير_ديون_العملاء_${todayISO()}.csv`);
+    link.setAttribute("download", `تقرير_متابعة_الديون_${todayISO()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -632,7 +645,7 @@ export default function Ledger() {
 
     const rows = finalFilteredDebts
       .map((r, i) => {
-        let agingLabel = "🟢 آمن";
+        let agingLabel = "🟢 تمام";
         if (r.agingStatus === "critical") agingLabel = "🔴 حرج";
         else if (r.agingStatus === "warning") agingLabel = "🟡 متوسط";
 
@@ -669,7 +682,7 @@ export default function Ledger() {
   </style>
   </head>
   <body>
-  <h2>تقرير ديون العملاء الإداري المُفلتر</h2>
+  <h2>تقرير ديون العملاء الإداري المفلتر</h2>
   <div>تاريخ الاستخراج: ${new Date().toLocaleDateString("ar-SA")}</div>
   <table>
   <thead>
@@ -683,7 +696,7 @@ export default function Ledger() {
   <th>عدد الفواتير</th>
   <th>آخر فاتورة</th>
   <th>آخر سداد</th>
-  <th>تصنيف عمر الدين</th>
+  <th>الحالة الزمنية</th>
   </tr>
   </thead>
   <tbody>
@@ -730,8 +743,10 @@ export default function Ledger() {
     let debit = 0;
     let credit = 0;
     for (const r of ledgerFiltered || []) {
-      debit += safeNum(r.debit);
-      credit += safeNum(r.credit);
+      if (!r.is_detail) {
+        debit += safeNum(r.debit);
+        credit += safeNum(r.credit);
+      }
     }
     const opening = safeNum(selectedCustomer?.opening_balance);
     const closing = opening + debit - credit;
@@ -849,7 +864,7 @@ export default function Ledger() {
     const table = `
       <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;">
         <thead>
-          <tr><th style="border:1px solid #ddd;padding:6px;">#</th><th style="border:1px solid #ddd;padding:6px;">التاريخ</th><th style="border:1px solid #ddd;padding:6px;">العميل</th><th style="border:1px solid #ddd;padding:6px;">فاتورة</th><th style="border:1px solid #ddd;padding:6px;">قراءة سابقة</th><th style="border:1px solid #ddd;padding:6px;">قراءة حالية</th><th style="border:1px solid #ddd;padding:6px;">استهلاك</th><th style="border:1px solid #ddd;padding:6px;">سعر الجيجا</th><th style="border:1px solid #ddd;padding:6px;">الإجمالي</th></tr>
+          <tr><th style="border:1px solid #ddd;padding:6px;">#</th><th style="border:1px solid #ddd;padding:6px;">التاريخ</th><th style="border:1px solid #ddd;padding:6px;">العميل</th><th style="border:1px solid #ddd;padding:6px;">فاتورة</th><th style="border:1px solid #ddd;padding:6px;">قراءة سابقة</th><th style="border:1px solid #ddd;padding:6px;">قراءة حالية</th><th style="border:1px solid #ddd;padding:6px;">استهلاك</th><th style="border:1px solid #ddd;padding:6px;">سعر الجيجا</th><th style="border:1px solid #ddd;padding:6px;">إجمالي</th></tr>
         </thead>
         <tbody>
           ${rows.map((r, i) => `<tr><td style="border:1px solid #ddd;padding:6px;">${i + 1}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_date || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.customer_name || ""}</td><td style="border:1px solid #ddd;padding:6px;">${r.invoice_id}</td><td style="border:1px solid #ddd;padding:6px;">${r.prev_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.curr_reading_gb}</td><td style="border:1px solid #ddd;padding:6px;">${r.usage_gb}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.price_per_gb)}</td><td style="border:1px solid #ddd;padding:6px;">${money(r.line_total)}</td></tr>`).join("")}
@@ -1007,7 +1022,16 @@ export default function Ledger() {
     const htmlRows = rows
       .map((r, idx) => {
         const isDetail = !!r.is_detail;
-        return `<tr style="${isDetail ? "opacity:0.85;" : ""}"><td>${idx + 1}</td><td>${escapeHtml(fmtDate(r.created_at))}</td><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.ref || "-")}</td><td>${isDetail ? "" : escapeHtml(money(r.debit))}</td><td>${isDetail ? "" : escapeHtml(money(r.credit))}</td><td>${isDetail ? "" : escapeHtml(money(r.running))}</td><td>${escapeHtml(r.note || "-")}</td></tr>`;
+        return `<tr style="${isDetail ? "opacity:0.8; background:#fafafa;" : ""}">
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(fmtDate(r.created_at))}</td>
+          <td style="${isDetail ? "color:#888;" : "font-weight:bold;"}">${escapeHtml(r.kind)}</td>
+          <td>${escapeHtml(r.ref || "-")}</td>
+          <td>${isDetail ? "" : (r.debit > 0 ? escapeHtml(money(r.debit)) : "")}</td>
+          <td>${isDetail ? "" : (r.credit > 0 ? escapeHtml(money(r.credit)) : "")}</td>
+          <td>${isDetail ? "" : escapeHtml(money(r.running))}</td>
+          <td style="${isDetail ? "font-size:11px; color:#555;" : ""}\">${escapeHtml(r.note || "-")}</td>
+        </tr>`;
       })
       .join("");
 
@@ -1031,13 +1055,13 @@ export default function Ledger() {
         </div>
         <div class="sum">
           <div class="box kpi"><div class="muted">افتتاحي</div><div class="v">${money(ledgerSummary.opening)}</div></div>
-          <div class="box kpi"><div class="muted">مدين</div><div class="v">${money(ledgerSummary.debit)}</div></div>
-          <div class="box kpi"><div class="muted">دائن</div><div class="v">${money(ledgerSummary.credit)}</div></div>
-          <div class="box kpi"><div class="muted">ختامي</div><div class="v">${money(ledgerSummary.closing)}</div></div>
+          <div class="box kpi"><div class="muted">مدين (له)</div><div class="v">${money(ledgerSummary.debit)}</div></div>
+          <div class="box kpi"><div class="muted">دائن (عليه)</div><div class="v">${money(ledgerSummary.credit)}</div></div>
+          <div class="box kpi"><div class="muted">ختامي صافي</div><div class="v" style="color:red;">${money(ledgerSummary.closing)}</div></div>
         </div>
         <table>
-          <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr></thead>
-          <tbody>${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات</td></tr>`}</tbody>
+          <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين (+)</th><th>دائن (-)</th><th>الرصيد المتصاعد</th><th>البيان والملاحظات</th></tr></thead>
+          <tbody>${htmlRows || `<tr><td colspan="8" style="text-align:center;color:#777">لا توجد بيانات في حساب العميل للفترة المحددة</td></tr>`}</tbody>
         </table>
         <script>setTimeout(()=>window.print(), 250);</script>
       </body>
@@ -1065,13 +1089,13 @@ export default function Ledger() {
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="badge">التقارير</div>
-          <h2 style={{ margin: "8px 0 0" }}>التقارير</h2>
+          <div className="badge">التقارير الإدارية</div>
+          <h2 style={{ margin: "8px 0 0" }}>التقارير والمطابقات المالية</h2>
           <div style={{ color: "var(--muted)", fontSize: 12 }}>
             {tab === "cardMoves" && <>حركة الكروت تشمل IN/OUT (ومن الفواتير أيضاً). {usingView ? "✅ View" : "ℹ️ Table"}.</>}
             {tab === "itemMoves" && <>حركة صنف + الرصيد الحالي (من card_types) مع إجمالي IN/OUT خلال الفترة.</>}
-            {tab === "customerLedger" && <>كشف حساب عميل (مختصر/مفصل) مع طباعة بنفس ستايل الفواتير.</>}
-            {tab === "customerDebts" && <>تحليل ديون العملاء المتقدم، تصنيف عمر الدين والمتابعة والتحصيل الفوري.</>}
+            {tab === "customerLedger" && <>كشف حساب عميل (حساب متصاعد دقيق ومبني زمنياً بشكل صحيح).</>}
+            {tab === "customerDebts" && <>تحليل ديون العملاء المتقدم والتحصيل (🔴 حرج &gt;15 يوم | 🟡 متوسط &gt;5 أيام | 🟢 تمام ≤ يومين).</>}
             {tab === "giga" && <>تقرير الجيجا (قراءات/استهلاك/سعر) خلال فترة، مع طباعة.</>}
           </div>
         </div>
@@ -1111,10 +1135,10 @@ export default function Ledger() {
             <>
               <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", color: "var(--muted)", fontSize: 12 }}>
                 <input type="checkbox" checked={ledgerDetailed} onChange={(e) => setLedgerDetailed(e.target.checked)} />
-                مفصل
+                عرض بنود الفواتير التفصيلية
               </label>
-              <button className="btn btn-outline" onClick={loadCustomerLedger} disabled={ledgerLoading || !custId}>تحديث</button>
-              <button className="btn" onClick={printCustomerLedger} disabled={ledgerLoading || !custId}>طباعة</button>
+              <button className="btn btn-outline" onClick={loadCustomerLedger} disabled={ledgerLoading || !custId}>تحديث الحساب</button>
+              <button className="btn" onClick={printCustomerLedger} disabled={ledgerLoading || !custId}>🖨️ طباعة كشف الحساب</button>
             </>
           )}
 
@@ -1136,15 +1160,15 @@ export default function Ledger() {
                 value={agingFilter} 
                 onChange={(e) => setAgingFilter(e.target.value)}
               >
-                <option value="all">📁 كل مستويات الدين</option>
-                <option value="critical">🔴 ديون حرجة (&gt;60 يوم)</option>
-                <option value="warning">🟡 ديون متوسطة (&gt;30 يوم)</option>
-                <option value="safe">🟢 ديون مستقرة / حديثة</option>
+                <option value="all">📁 كل الحسابات</option>
+                <option value="critical">🔴 ديون حرجة (&gt;15 يوم)</option>
+                <option value="warning">🟡 ديون متوسطة (&gt;5 أيام)</option>
+                <option value="safe">🟢 تمام ومستقر (≤ يومين)</option>
               </select>
 
               <input
                 className="input"
-                placeholder="بحث سريع باسم العميل..."
+                placeholder="بحث باسم العميل..."
                 value={debtSearch}
                 onChange={(e) => setDebtSearch(e.target.value)}
                 style={{ maxWidth: 220 }}
@@ -1168,20 +1192,19 @@ export default function Ledger() {
         </div>
       </div>
 
-      {/* =============== ديون العملاء (v2 - مدمج بها عمر الدين والتحصيل) =============== */}
+      {/* =============== ديون العملاء =============== */}
       {tab === "customerDebts" && (
         <div style={{ width: "100%", marginTop: "15px" }}>
-          {/* بطاقات الملخص الإداري الأربعة */}
           <div style={{ display: "flex", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
             <div style={{ flex: "1", minWidth: "220px", background: "#fff5f5", borderRight: "5px solid #e53e3e", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>💰 إجمالي الديون القائمة</div>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>💰 إجمالي الديون المعروضة</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#e53e3e", marginTop: "5px" }}>
                 {money(finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0))} <span style={{ fontSize: "12px" }}>ريال</span>
               </div>
             </div>
 
             <div style={{ flex: "1", minWidth: "220px", background: "#f0fff4", borderRight: "5px solid #38a169", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 العملاء المدينون بالتقرير</div>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 عدد العملاء بالفلتر</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#38a169", marginTop: "5px" }}>
                 {finalFilteredDebts.filter((r) => r.balance > 0).length} <span style={{ fontSize: "12px" }}>عميل</span>
               </div>
@@ -1195,7 +1218,7 @@ export default function Ledger() {
             </div>
 
             <div style={{ flex: "1", minWidth: "220px", background: "#fffaf0", borderRight: "5px solid #dd6b20", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط دين العميل حالياً</div>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط الدين المتبقي</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#dd6b20", marginTop: "5px" }}>
                 {money(
                   finalFilteredDebts.filter((r) => r.balance > 0).length > 0
@@ -1206,7 +1229,6 @@ export default function Ledger() {
             </div>
           </div>
 
-          {/* الجدول المحدث والمطور */}
           <div className="card">
             <div className="table-wrap">
               <table className="table">
@@ -1221,13 +1243,13 @@ export default function Ledger() {
                     <th>عدد الفواتير</th>
                     <th>آخر فاتورة</th>
                     <th>آخر سداد</th>
-                    <th>مستوى الخطورة</th>
+                    <th>حالة الحساب</th>
                     <th>خيارات ومتابعة</th>
                   </tr>
                 </thead>
                 <tbody>
                   {finalFilteredDebts.length === 0 ? (
-                    <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات تطابق الفلترة الحالية، اضغط تحديث</td></tr>
+                    <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد ديون تطابق خيارات البحث أو التصفية الحالية</td></tr>
                   ) : (
                     finalFilteredDebts.map((c, i) => (
                       <tr key={c.id}>
@@ -1241,9 +1263,9 @@ export default function Ledger() {
                         <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastInvoice}</span></td>
                         <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastPayment}</span></td>
                         <td>
-                          {c.agingStatus === "critical" && <span className="pill pill-out" style={{ background: "#fff5f5", color: "#e53e3e", border: "1px solid #e53e3e", padding: "2px 8px" }}>🔴 حرج</span>}
-                          {c.agingStatus === "warning" && <span className="pill" style={{ background: "#fffaf0", color: "#dd6b20", border: "1px solid #dd6b20", padding: "2px 8px" }}>🟡 متوسط</span>}
-                          {c.agingStatus === "safe" && <span className="pill pill-in" style={{ background: "#f0fff4", color: "#38a169", border: "1px solid #38a169", padding: "2px 8px" }}>🟢 مستقر</span>}
+                          {c.agingStatus === "critical" && <span className="pill pill-out" style={{ background: "#fff5f5", color: "#e53e3e", border: "1px solid #e53e3e", padding: "2px 8px" }}>🔴 حرج (&gt;15 يوم)</span>}
+                          {c.agingStatus === "warning" && <span className="pill" style={{ background: "#fffaf0", color: "#dd6b20", border: "1px solid #dd6b20", padding: "2px 8px" }}>🟡 متوسط (&gt;5 أيام)</span>}
+                          {c.agingStatus === "safe" && <span className="pill pill-in" style={{ background: "#f0fff4", color: "#38a169", border: "1px solid #38a169", padding: "2px 8px" }}>🟢 تمام (≤ يومين)</span>}
                         </td>
                         <td>
                           <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
@@ -1383,48 +1405,85 @@ export default function Ledger() {
         </>
       )}
 
-      {/* =============== كشف حساب عميل =============== */}
+      {/* =============== كشف حساب عميل (المطور حسابياً وجمالياً) =============== */}
       {tab === "customerLedger" && (
         <>
           <div className="card no-print" style={{ marginBottom: 12 }}>
             <div className="grid4">
               <label>من<input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
               <label>إلى<input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-              <label>العميل *
+              <label>العميل المستهدف *
                 <select className="input" value={custId} onChange={(e) => setCustId(e.target.value)}>
-                  <option value="">اختر عميل...</option>
+                  <option value="">اختر عميل لمعاينة حسابه...</option>
                   {(customers || []).map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
               </label>
-              <label>بحث<input className="input" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="نوع/مرجع/ملاحظة..." /></label>
+              <label>فلترة الحركات داخل الكشف<input className="input" value={ledgerSearch} onChange={(e) => setLedgerSearch(e.target.value)} placeholder="بحث بالنوع أو المرجع أو الملاحظة..." /></label>
             </div>
-            <div className="grid2" style={{ marginTop: 10 }}>
+            
+            <div className="grid2" style={{ marginTop: 12 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                <div className="mini-card"><div className="mini-title">افتتاحي</div><div className="mini-value">{money(ledgerSummary.opening)}</div></div>
-                <div className="mini-card"><div className="mini-title">مدين</div><div className="mini-value">{money(ledgerSummary.debit)}</div></div>
-                <div className="mini-card"><div className="mini-title">دائن</div><div className="mini-value">{money(ledgerSummary.credit)}</div></div>
-                <div className="mini-card"><div className="mini-title">ختامي</div><div className="mini-value">{money(ledgerSummary.closing)}</div></div>
+                <div className="mini-card" style={{ background: "#f9f9f9" }}><div className="mini-title">الرصيد الافتتاحي</div><div className="mini-value">{money(ledgerSummary.opening)}</div></div>
+                <div className="mini-card" style={{ background: "#ebf8ff" }}><div className="mini-title">إجمالي المدين (+)</div><div className="mini-value" style={{ color: "#2b6cb0" }}>{money(ledgerSummary.debit)}</div></div>
+                <div className="mini-card" style={{ background: "#f0fff4" }}><div className="mini-title">إجمالي الدائن (-)</div><div className="mini-value" style={{ color: "#2f855a" }}>{money(ledgerSummary.credit)}</div></div>
+                <div className="mini-card" style={{ background: "#fff5f5", border: "1px solid #feb2b2" }}><div className="mini-title">الرصيد الختامي الصافي</div><div className="mini-value" style={{ color: "#c53030", fontWeight: "900" }}>{money(ledgerSummary.closing)}</div></div>
               </div>
             </div>
           </div>
+
           <div className="card">
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>مرجع</th><th>مدين</th><th>دائن</th><th>الرصيد</th><th>ملاحظة</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>التاريخ والوقت</th>
+                    <th>نوع الحركة</th>
+                    <th>رقم المرجع</th>
+                    <th>مدين (+)</th>
+                    <th>دائن (-)</th>
+                    <th style={{ background: "#f4f6fb", fontWeight: "bold" }}>الرصيد المتصاعد</th>
+                    <th>البيان / الملاحظات التفصيلية</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {!custId ? (
-                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>اختر عميل ثم اضغط (تحديث)</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>يرجى اختيار العميل ثم الضغط على (تحديث الحساب) لاستعراض القيود المالية</td></tr>
                   ) : (ledgerFiltered || []).length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: "20px" }}>لا توجد حركات مالية مسجلة لهذا العميل في الفترة المحددة</td></tr>
                   ) : (
-                    (ledgerFiltered || []).map((r, idx) => (
-                      <tr key={idx} style={r.is_detail ? { opacity: 0.85 } : undefined}><td>{idx + 1}</td><td>{fmtDate(r.created_at)}</td><td>{r.kind}</td><td>{r.ref || "-"}</td><td>{r.is_detail ? "" : money(r.debit)}</td><td>{r.is_detail ? "" : money(r.credit)}</td><td>{r.is_detail ? "" : money(r.running)}</td><td style={{ maxWidth: 420, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.note || "-"}</td></tr>
-                    ))
+                    (ledgerFiltered || []).map((r, idx) => {
+                      const isDetail = !!r.is_detail;
+                      return (
+                        <tr 
+                          key={idx} 
+                          style={isDetail ? { background: "#fdfdfd", opacity: 0.85 } : { fontWeight: "500" }}
+                        >
+                          <td>{idx + 1}</td>
+                          <td style={isDetail ? { fontSize: "11px", color: "#888" } : null}>{fmtDate(r.created_at)}</td>
+                          <td style={isDetail ? { color: "#999", fontStyle: "italic" } : { fontWeight: "bold" }}>
+                            {isDetail ? "— بند فرعي" : r.kind}
+                          </td>
+                          <td style={isDetail ? { color: "#777" } : null}><strong>{r.ref || "-"}</strong></td>
+                          
+                          {/* قيم المدين والدائن والرصيد المتصاعد */}
+                          <td style={{ color: "#2b6cb0" }}>{isDetail ? "" : (r.debit > 0 ? money(r.debit) : "")}</td>
+                          <td style={{ color: "#2f855a" }}>{isDetail ? "" : (r.credit > 0 ? money(r.credit) : "")}</td>
+                          <td style={isDetail ? { color: "#ccc" } : { background: "#f7fafc", fontWeight: "bold", color: "#2d3748" }}>
+                            {money(r.running)}
+                          </td>
+                          
+                          <td style={isDetail ? { fontSize: "12px", color: "#4a5568", textAlign: "right" } : { textAlign: "right" }}>
+                            {r.note || "-"}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
-            {ledgerLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جارٍ التحميل...</div>}
+            {ledgerLoading && <div style={{ padding: 12, color: "var(--muted)", fontSize: 12 }}>جاري استخراج وتحديث قيود الحساب المالي...</div>}
           </div>
         </>
       )}
