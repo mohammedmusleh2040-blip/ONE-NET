@@ -68,6 +68,7 @@ export default function Ledger() {
   const [customerDebts, setCustomerDebts] = useState([]);
   const [debtsLoading, setDebtsLoading] = useState(false);
   const [debtSearch, setDebtSearch] = useState("");
+  const [agingFilter, setAgingFilter] = useState("all"); // all | critical | warning | safe
 
   // ===== Auth / Seller Guard =====
   const [authUser, setAuthUser] = useState(null);
@@ -492,13 +493,13 @@ export default function Ledger() {
     }
   }
 
-  // ===================== Customer Debts (v1 Implementation) =====================
+  // ===================== Customer Debts (v1 & Aging & WhatsApp Implementation) =====================
   async function loadCustomerDebts() {
     setDebtsLoading(true);
     try {
       const { data: customersData, error: cErr } = await supabase
         .from("customers")
-        .select("id,name,opening_balance")
+        .select("id,name,opening_balance,phone")
         .order("name");
       if (cErr) throw cErr;
 
@@ -530,20 +531,34 @@ export default function Ledger() {
           ? cPayments.sort((a, b) => new Date(b.pay_date) - new Date(a.pay_date))[0].pay_date.slice(0, 10)
           : "-";
 
+        // تحديد فئة خطورة عمر الدين (Aging Class)
+        let agingStatus = "safe"; // آمن
+        const effectiveDateStr = lastPayment !== "-" ? lastPayment : (lastInvoice !== "-" ? lastInvoice : null);
+        
+        if (balance > 0 && effectiveDateStr) {
+          const diffTime = Math.abs(new Date() - new Date(effectiveDateStr));
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays > 60) agingStatus = "critical"; // حرجة جداً
+          else if (diffDays > 30) agingStatus = "warning"; // متوسطة الخطورة
+        } else if (balance > 0 && !effectiveDateStr) {
+          agingStatus = "critical"; // دين قديم معلق بلا حركات
+        }
+
         return {
           id: c.id,
           name: c.name,
+          phone: c.phone || "",
           opening,
           invoices: invTotal,
           payments: payTotal,
           balance,
           invoiceCount,
           lastInvoice,
-          lastPayment
+          lastPayment,
+          agingStatus
         };
       }).filter((r) => r.balance > 0);
 
-      console.log("ROWS =", rows);
       setCustomerDebts(rows);
     } catch (err) {
       console.error("Customer Debts Error:", err);
@@ -553,21 +568,75 @@ export default function Ledger() {
     }
   }
 
+  // فلترة قائمة الديون بناءً على تصنيف عمر الدين وبحث الاسم
+  const finalFilteredDebts = useMemo(() => {
+    return customerDebts.filter((c) => {
+      const matchSearch = c.name?.toLowerCase().includes(debtSearch.toLowerCase());
+      const matchAging = agingFilter === "all" ? true : c.agingStatus === agingFilter;
+      return matchSearch && matchAging;
+    });
+  }, [customerDebts, debtSearch, agingFilter]);
+
+  // دالة إرسال التذكير الآلي عبر الواتساب
+  function sendWhatsAppReminder(customer) {
+    if (!customer.phone) {
+      alert("عذراً، لا يوجد رقم هاتف مسجل لهذا العميل لإرسال تذكير.");
+      return;
+    }
+    const msg = `السلام عليكم ورحمة الله وبركاته، أخي العزيز ${customer.name}. نود تذكيركم بأن صافي الرصيد المستحق والمتبقي في حسابكم لدينا هو: ${money(customer.balance)} ريال. شاكرين ومقدرين لكم حسن تعاونكم الدائم معنا.`;
+    const encodedMsg = encodeURIComponent(msg);
+    // تنظيف رقم الهاتف وإزالة الرموز
+    const cleanPhone = customer.phone.replace(/[^0-9]/g, "");
+    window.open(`https://wa.me/${cleanPhone}?text=${encodedMsg}`, "_blank");
+  }
+
+  // دالة تصدير تقرير الديون الحالي إلى ملف Excel (CSV)
+  function exportDebtsToCSV() {
+    if (!finalFilteredDebts.length) {
+      alert("لا توجد بيانات متاحة للتصدير حالياً.");
+      return;
+    }
+
+    let csvContent = "\uFEFF"; // إضافة BOM لدعم اللغة العربية في إكسل دون مشاكل ترميز
+    csvContent += "#,اسم العميل,الرصيد الافتتاحي,إجمالي الفواتير,إجمالي السداد,الرصيد المتبقي,عدد الفواتير,تاريخ آخر فاتورة,تاريخ آخر سداد,حالة خطورة الدين\n";
+
+    finalFilteredDebts.forEach((r, idx) => {
+      let statusText = "آمن مستقر";
+      if (r.agingStatus === "critical") statusText = "حرج (متأخر جداً)";
+      else if (r.agingStatus === "warning") statusText = "متوسط الخطورة";
+
+      csvContent += `${idx + 1},"${r.name}",${r.opening.toFixed(2)},${r.invoices.toFixed(2)},${r.payments.toFixed(2)},${r.balance.toFixed(2)},${r.invoiceCount},${r.lastInvoice},${r.lastPayment},"${statusText}"\n`;
+    });
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `تقرير_ديون_العملاء_${todayISO()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
   function printCustomerDebts() {
-    if (!customerDebts || customerDebts.length === 0) {
+    if (!finalFilteredDebts || finalFilteredDebts.length === 0) {
       alert("لا توجد بيانات للطباعة");
       return;
     }
 
-    const totalOpening = customerDebts.reduce((s, r) => s + Number(r.opening || 0), 0);
-    const totalInvoices = customerDebts.reduce((s, r) => s + Number(r.invoices || 0), 0);
-    const totalPaid = customerDebts.reduce((s, r) => s + Number(r.payments || 0), 0);
-    const totalRemain = customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0);
-    const totalInvoicesCount = customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0);
+    const totalOpening = finalFilteredDebts.reduce((s, r) => s + Number(r.opening || 0), 0);
+    const totalInvoices = finalFilteredDebts.reduce((s, r) => s + Number(r.invoices || 0), 0);
+    const totalPaid = finalFilteredDebts.reduce((s, r) => s + Number(r.payments || 0), 0);
+    const totalRemain = finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0);
+    const totalInvoicesCount = finalFilteredDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0);
 
-    const rows = customerDebts
-      .map(
-        (r, i) => `
+    const rows = finalFilteredDebts
+      .map((r, i) => {
+        let agingLabel = "🟢 آمن";
+        if (r.agingStatus === "critical") agingLabel = "🔴 حرج";
+        else if (r.agingStatus === "warning") agingLabel = "🟡 متوسط";
+
+        return `
   <tr>
   <td>${i + 1}</td>
   <td>${r.name || ""}</td>
@@ -578,8 +647,9 @@ export default function Ledger() {
   <td>${r.invoiceCount || 0}</td>
   <td>${r.lastInvoice || "-"}</td>
   <td>${r.lastPayment || "-"}</td>
-  </tr>`
-      )
+  <td>${agingLabel}</td>
+  </tr>`;
+      })
       .join("");
 
     const w = window.open("", "_blank");
@@ -588,7 +658,7 @@ export default function Ledger() {
   <html dir="rtl">
   <head>
   <meta charset="utf-8">
-  <title>تقرير ديون العملاء الإداري</title>
+  <title>تقرير ديون العملاء المفلتر</title>
   <style>
   body{ font-family:Tahoma, Arial; padding:20px; }
   h2{ text-align:center; margin-bottom:5px; }
@@ -599,7 +669,7 @@ export default function Ledger() {
   </style>
   </head>
   <body>
-  <h2>تقرير ديون العملاء الإداري</h2>
+  <h2>تقرير ديون العملاء الإداري المُفلتر</h2>
   <div>تاريخ الاستخراج: ${new Date().toLocaleDateString("ar-SA")}</div>
   <table>
   <thead>
@@ -613,6 +683,7 @@ export default function Ledger() {
   <th>عدد الفواتير</th>
   <th>آخر فاتورة</th>
   <th>آخر سداد</th>
+  <th>تصنيف عمر الدين</th>
   </tr>
   </thead>
   <tbody>
@@ -620,12 +691,13 @@ export default function Ledger() {
   </tbody>
   <tfoot>
   <tr>
-  <td colspan="2">الإجمالي العام</td>
+  <td colspan="2">الإجمالي العام للتقرير</td>
   <td>${totalOpening.toFixed(2)}</td>
   <td>${totalInvoices.toFixed(2)}</td>
   <td>${totalPaid.toFixed(2)}</td>
   <td style="color: red;">${totalRemain.toFixed(2)}</td>
   <td>${totalInvoicesCount}</td>
+  <td>-</td>
   <td>-</td>
   <td>-</td>
   </tr>
@@ -999,7 +1071,7 @@ export default function Ledger() {
             {tab === "cardMoves" && <>حركة الكروت تشمل IN/OUT (ومن الفواتير أيضاً). {usingView ? "✅ View" : "ℹ️ Table"}.</>}
             {tab === "itemMoves" && <>حركة صنف + الرصيد الحالي (من card_types) مع إجمالي IN/OUT خلال الفترة.</>}
             {tab === "customerLedger" && <>كشف حساب عميل (مختصر/مفصل) مع طباعة بنفس ستايل الفواتير.</>}
-            {tab === "customerDebts" && <>تقرير ديون العملاء الإداري الشامل، مع الملخصات والمؤشرات العامة والتواريخ.</>}
+            {tab === "customerDebts" && <>تحليل ديون العملاء المتقدم، تصنيف عمر الدين والمتابعة والتحصيل الفوري.</>}
             {tab === "giga" && <>تقرير الجيجا (قراءات/استهلاك/سعر) خلال فترة، مع طباعة.</>}
           </div>
         </div>
@@ -1049,17 +1121,33 @@ export default function Ledger() {
           {tab === "customerDebts" && (
             <>
               <button className="btn" onClick={loadCustomerDebts} disabled={debtsLoading}>
-                {debtsLoading ? "جاري التحميل..." : "تحديث"}
+                {debtsLoading ? "جاري التحميل..." : "تحديث البيانات"}
               </button>
-              <button className="btn btn-outline" onClick={printCustomerDebts} disabled={!customerDebts.length}>
-                طباعة
+              <button className="btn btn-outline" onClick={exportDebtsToCSV} disabled={!finalFilteredDebts.length}>
+                📊 تصدير Excel
               </button>
+              <button className="btn btn-outline" onClick={printCustomerDebts} disabled={!finalFilteredDebts.length}>
+                🖨️ طباعة المفلتر
+              </button>
+              
+              <select 
+                className="input" 
+                style={{ maxWidth: 180, border: "1px solid #aaa" }} 
+                value={agingFilter} 
+                onChange={(e) => setAgingFilter(e.target.value)}
+              >
+                <option value="all">📁 كل مستويات الدين</option>
+                <option value="critical">🔴 ديون حرجة (&gt;60 يوم)</option>
+                <option value="warning">🟡 ديون متوسطة (&gt;30 يوم)</option>
+                <option value="safe">🟢 ديون مستقرة / حديثة</option>
+              </select>
+
               <input
                 className="input"
-                placeholder="بحث باسم العميل..."
+                placeholder="بحث سريع باسم العميل..."
                 value={debtSearch}
                 onChange={(e) => setDebtSearch(e.target.value)}
-                style={{ maxWidth: 300 }}
+                style={{ maxWidth: 220 }}
               />
             </>
           )}
@@ -1080,7 +1168,7 @@ export default function Ledger() {
         </div>
       </div>
 
-      {/* =============== ديون العملاء (v1 - المرحلة الثانية) =============== */}
+      {/* =============== ديون العملاء (v2 - مدمج بها عمر الدين والتحصيل) =============== */}
       {tab === "customerDebts" && (
         <div style={{ width: "100%", marginTop: "15px" }}>
           {/* بطاقات الملخص الإداري الأربعة */}
@@ -1088,37 +1176,37 @@ export default function Ledger() {
             <div style={{ flex: "1", minWidth: "220px", background: "#fff5f5", borderRight: "5px solid #e53e3e", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
               <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>💰 إجمالي الديون القائمة</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#e53e3e", marginTop: "5px" }}>
-                {money(customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0))} <span style={{ fontSize: "12px" }}>ريال</span>
+                {money(finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0))} <span style={{ fontSize: "12px" }}>ريال</span>
               </div>
             </div>
 
             <div style={{ flex: "1", minWidth: "220px", background: "#f0fff4", borderRight: "5px solid #38a169", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 العملاء المدينون</div>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>👥 العملاء المدينون بالتقرير</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#38a169", marginTop: "5px" }}>
-                {customerDebts.filter((r) => r.balance > 0).length} <span style={{ fontSize: "12px" }}>عميل</span>
+                {finalFilteredDebts.filter((r) => r.balance > 0).length} <span style={{ fontSize: "12px" }}>عميل</span>
               </div>
             </div>
 
             <div style={{ flex: "1", minWidth: "220px", background: "#ebf8ff", borderRight: "5px solid #3182ce", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
               <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📄 إجمالي فواتير الآجل</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#3182ce", marginTop: "5px" }}>
-                {customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)} <span style={{ fontSize: "12px" }}>فاتورة</span>
+                {finalFilteredDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)} <span style={{ fontSize: "12px" }}>فاتورة</span>
               </div>
             </div>
 
             <div style={{ flex: "1", minWidth: "220px", background: "#fffaf0", borderRight: "5px solid #dd6b20", padding: "15px", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط دين العميل</div>
+              <div style={{ fontSize: "13px", color: "#666", fontWeight: "bold" }}>📊 متوسط دين العميل حالياً</div>
               <div style={{ fontSize: "22px", fontWeight: "bold", color: "#dd6b20", marginTop: "5px" }}>
                 {money(
-                  customerDebts.filter((r) => r.balance > 0).length > 0
-                    ? customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0) / customerDebts.filter((r) => r.balance > 0).length
+                  finalFilteredDebts.filter((r) => r.balance > 0).length > 0
+                    ? finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0) / finalFilteredDebts.filter((r) => r.balance > 0).length
                     : 0
                 )} <span style={{ fontSize: "12px" }}>ريال</span>
               </div>
             </div>
           </div>
 
-          {/* الجدول المحدث */}
+          {/* الجدول المحدث والمطور */}
           <div className="card">
             <div className="table-wrap">
               <table className="table">
@@ -1133,27 +1221,32 @@ export default function Ledger() {
                     <th>عدد الفواتير</th>
                     <th>آخر فاتورة</th>
                     <th>آخر سداد</th>
-                    <th>خيارات</th>
+                    <th>مستوى الخطورة</th>
+                    <th>خيارات ومتابعة</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {customerDebts.length === 0 ? (
-                    <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--muted)" }}>اضغط على تحديث لجلب التقارير</td></tr>
+                  {finalFilteredDebts.length === 0 ? (
+                    <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)" }}>لا توجد بيانات تطابق الفلترة الحالية، اضغط تحديث</td></tr>
                   ) : (
-                    customerDebts
-                      .filter((c) => c.name?.toLowerCase().includes(debtSearch.toLowerCase()))
-                      .map((c, i) => (
-                        <tr key={c.id}>
-                          <td>{i + 1}</td>
-                          <td><strong>{c.name}</strong></td>
-                          <td>{money(c.opening)}</td>
-                          <td>{money(c.invoices)}</td>
-                          <td>{money(c.payments)}</td>
-                          <td><b style={{ color: "red" }}>{money(c.balance)}</b></td>
-                          <td>{c.invoiceCount}</td>
-                          <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastInvoice}</span></td>
-                          <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastPayment}</span></td>
-                          <td>
+                    finalFilteredDebts.map((c, i) => (
+                      <tr key={c.id}>
+                        <td>{i + 1}</td>
+                        <td><strong>{c.name}</strong></td>
+                        <td>{money(c.opening)}</td>
+                        <td>{money(c.invoices)}</td>
+                        <td>{money(c.payments)}</td>
+                        <td><b style={{ color: "red" }}>{money(c.balance)}</b></td>
+                        <td>{c.invoiceCount}</td>
+                        <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastInvoice}</span></td>
+                        <td><span style={{ fontSize: "11px", color: "#555" }}>{c.lastPayment}</span></td>
+                        <td>
+                          {c.agingStatus === "critical" && <span className="pill pill-out" style={{ background: "#fff5f5", color: "#e53e3e", border: "1px solid #e53e3e", padding: "2px 8px" }}>🔴 حرج</span>}
+                          {c.agingStatus === "warning" && <span className="pill" style={{ background: "#fffaf0", color: "#dd6b20", border: "1px solid #dd6b20", padding: "2px 8px" }}>🟡 متوسط</span>}
+                          {c.agingStatus === "safe" && <span className="pill pill-in" style={{ background: "#f0fff4", color: "#38a169", border: "1px solid #38a169", padding: "2px 8px" }}>🟢 مستقر</span>}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
                             <button
                               className="btn btn-outline"
                               onClick={() => {
@@ -1161,22 +1254,31 @@ export default function Ledger() {
                                 setTab("customerLedger");
                                 setTimeout(() => loadCustomerLedger(), 100);
                               }}
-                              style={{ padding: "3px 10px", fontSize: "12px", minHeight: "auto" }}
+                              style={{ padding: "3px 8px", fontSize: "11px", minHeight: "auto", whiteSpace: "nowrap" }}
                             >
                               📄 كشف الحساب
                             </button>
-                          </td>
-                        </tr>
-                      ))
+                            <button
+                              className="btn"
+                              onClick={() => sendWhatsAppReminder(c)}
+                              style={{ padding: "3px 8px", fontSize: "11px", minHeight: "auto", background: "#25D366", color: "#fff", borderColor: "#25D366", whiteSpace: "nowrap" }}
+                            >
+                              💬 تذكير واتساب
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
-                  {customerDebts.length > 0 && (
+                  {finalFilteredDebts.length > 0 && (
                     <tr style={{ fontWeight: "bold", background: "var(--border-color)", borderTop: "2px solid #aaa" }}>
-                      <td colSpan="2">الإجمالي العام</td>
-                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.opening || 0), 0))}</td>
-                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.invoices || 0), 0))}</td>
-                      <td>{money(customerDebts.reduce((s, r) => s + Number(r.payments || 0), 0))}</td>
-                      <td style={{ color: "red" }}>{money(customerDebts.reduce((s, r) => s + Number(r.balance || 0), 0))}</td>
-                      <td>{customerDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)}</td>
+                      <td colSpan="2">الإجمالي العام المستعرض</td>
+                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.opening || 0), 0))}</td>
+                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.invoices || 0), 0))}</td>
+                      <td>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.payments || 0), 0))}</td>
+                      <td style={{ color: "red" }}>{money(finalFilteredDebts.reduce((s, r) => s + Number(r.balance || 0), 0))}</td>
+                      <td>{finalFilteredDebts.reduce((s, r) => s + Number(r.invoiceCount || 0), 0)}</td>
+                      <td>-</td>
                       <td>-</td>
                       <td>-</td>
                       <td>-</td>
