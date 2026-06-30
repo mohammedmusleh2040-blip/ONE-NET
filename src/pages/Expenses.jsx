@@ -1,4 +1,4 @@
-
+// src/pages/Expenses.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
@@ -27,30 +27,24 @@ function toDateOnly(isoOrDateLike) {
   }
 }
 
-// Parse employee name from note (supports Arabic/English patterns)
+// دالة ذكية لتفكيك اسم الموظف من عمود الملاحظات
 const parseEmployee = (note) => {
   const s = String(note || "").trim();
   if (!s) return "";
-  // Arabic: "الموظف: محمد" or "موظف: محمد"
   let m = s.match(/(?:الموظف|موظف)\s*[:：]\s*([^|\n]+)/i);
   if (m && m[1]) return m[1].trim();
-  // English: "EMP: John"
-  m = s.match(/\bEMP\s*[:：]\s*([^|\n]+)/i);
-  if (m && m[1]) return m[1].trim();
-  // Fallback: first token before "|" if exists
   const part = s.split("|")[0].trim();
   return part.length <= 40 ? part : "";
 };
 
-const buildEmpNote = (emp, note) => {
+const buildEmpNote = (emp, note, extra = "") => {
   const e = String(emp || "").trim();
   const n = String(note || "").trim();
   const head = e ? `الموظف: ${e}` : "";
-  if (!head) return n;
-  if (!n) return head;
-  // Avoid duplicating employee header
-  if (n.includes("الموظف:") || /\bEMP\s*:/i.test(n)) return n;
-  return `${head} | ${n}`;
+  let res = head;
+  if (n) res += ` | ${n}`;
+  if (extra) res += ` | ${extra}`;
+  return res;
 };
 
 export default function Expenses() {
@@ -62,25 +56,29 @@ export default function Expenses() {
   const [q, setQ] = useState("");
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
-  const [direction, setDirection] = useState("all"); // all | expense | income
-  const [method, setMethod] = useState("all"); // all | cash | bank | other
+  const [direction, setDirection] = useState("all"); 
+  const [method, setMethod] = useState("all"); 
 
-  // Tabs: expenses/income vs salaries
-  const [tab, setTab] = useState("expenses"); // 'expenses' | 'salaries'
+  // Tabs
+  const [tab, setTab] = useState("expenses"); 
 
   // printing mode
-  const [printMode, setPrintMode] = useState("none"); // none | expenses | employee
+  const [printMode, setPrintMode] = useState("none"); 
 
-  // Salary/Advance form
+  // 🔥 شاشة الرواتب والسلف الاحترافية المترابطة
   const [salDate, setSalDate] = useState(todayISO());
   const [salEmployee, setSalEmployee] = useState("");
   const [salType, setSalType] = useState("salary"); // salary | advance
   const [salAmount, setSalAmount] = useState("");
   const [salMethod, setSalMethod] = useState("cash");
   const [salNote, setSalNote] = useState("");
+  const [salMonth, setSalMonth] = useState(() => new Date().toLocaleString("ar-EG", { month: "long" }));
+  const [salBaseAmount, setSalBaseAmount] = useState("4000"); // الراتب الأساسي الافتراضي للموظف
 
-  // printing (employee statement)
+  // كشف حساب الموظف
   const [empFilter, setEmpFilter] = useState("");
+  const [statementFrom, setStatementFrom] = useState(() => todayISO().slice(0, 8) + "01");
+  const [statementTo, setStatementTo] = useState(() => todayISO());
 
   // toast
   const [toast, setToast] = useState("");
@@ -94,8 +92,8 @@ export default function Expenses() {
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
 
-  // form (matching your table)
-  const [fDirection, setFDirection] = useState("expense"); // expense | income
+  // form
+  const [fDirection, setFDirection] = useState("expense"); 
   const [fExpenseDate, setFExpenseDate] = useState(todayISO());
   const [fCategory, setFCategory] = useState("");
   const [fAmount, setFAmount] = useState("");
@@ -128,156 +126,82 @@ export default function Expenses() {
   useEffect(() => {
     loadRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [from, to]);
 
   // ===== computed (expenses/income) =====
   const filtered = useMemo(() => {
     const s = String(q || "").trim().toLowerCase();
-
     return (rows || []).filter((r) => {
       if (direction !== "all" && String(r.direction || "") !== direction) return false;
       if (method !== "all" && String(r.method || "") !== method) return false;
-
       if (!s) return true;
-      const cat = String(r.category || "").toLowerCase();
-      const note = String(r.note || "").toLowerCase();
-      const id = String(r.id || "").toLowerCase();
-      return cat.includes(s) || note.includes(s) || id.includes(s);
+      return String(r.category || "").toLowerCase().includes(s) || String(r.note || "").toLowerCase().includes(s) || String(r.id).includes(s);
     });
   }, [rows, q, direction, method]);
 
   const totals = useMemo(() => {
-    let income = 0;
-    let expense = 0;
-    let incomeCash = 0;
-    let expenseCash = 0;
-
+    let income = 0; let expense = 0; let incomeCash = 0; let expenseCash = 0;
     for (const r of filtered) {
       const amt = safeNum(r.amount);
       const isCash = String(r.method || "") === "cash";
-
       if (String(r.direction) === "income") {
-        income += amt;
-        if (isCash) incomeCash += amt;
+        income += amt; if (isCash) incomeCash += amt;
       } else {
-        expense += amt;
-        if (isCash) expenseCash += amt;
+        expense += amt; if (isCash) expenseCash += amt;
       }
     }
-
-    return {
-      income,
-      expense,
-      net: income - expense,
-      cashNet: incomeCash - expenseCash,
-    };
+    return { income, expense, net: income - expense, cashNet: incomeCash - expenseCash };
   }, [filtered]);
 
-  // ===== modal helpers =====
-  function resetForm() {
-    setEditId(null);
-    setFDirection("expense");
-    setFExpenseDate(todayISO());
-    setFCategory("");
-    setFAmount("");
-    setFMethod("cash");
-    setFNote("");
-    setFCreatedAt(nowISO());
-  }
-
-  function openNew(dir = "expense") {
-    resetForm();
-    setFDirection(dir);
-    setOpen(true);
-  }
-
-  function openEdit(r) {
-    setEditId(r.id);
-    setFDirection(r.direction || "expense");
-    setFExpenseDate(toDateOnly(r.expense_date));
-    setFCategory(r.category || "");
-    setFAmount(String(r.amount ?? ""));
-    setFMethod(r.method || "cash");
-    setFNote(r.note || "");
-    setFCreatedAt(r.created_at || nowISO());
-    setOpen(true);
-  }
-
-  async function saveRow(e) {
-    e?.preventDefault?.();
-
-    const amt = safeNum(fAmount);
-    if (!String(fCategory || "").trim()) return alert("اكتب بند/نوع (مثلاً: راتب، كهرباء، إيجار…)");
-    if (!Number.isFinite(amt) || amt <= 0) return alert("اكتب مبلغ صحيح (أكبر من صفر)");
-    if (!fExpenseDate) return alert("اختر تاريخ");
-
-    setSaving(true);
-    try {
-      const payload = {
-        expense_date: fExpenseDate,
-        category: String(fCategory).trim(),
-        amount: amt,
-        direction: fDirection,
-        method: fMethod,
-        note: fNote || null,
-        created_at: fCreatedAt || nowISO(),
-      };
-
-      if (editId) {
-        const { error } = await supabase.from("expenses").update(payload).eq("id", editId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from("expenses").insert(payload);
-        if (error) throw error;
-      }
-
-      setOpen(false);
-      resetForm();
-      await loadRows();
-      showToast("✅ تم الحفظ");
-    } catch (e2) {
-      console.error(e2);
-      alert(e2?.message || "فشل الحفظ");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function delRow(id) {
-    const ok = confirm("حذف السجل؟");
-    if (!ok) return;
-
-    try {
-      setLoading(true);
-      const { error } = await supabase.from("expenses").delete().eq("id", id);
-      if (error) throw error;
-      await loadRows();
-      showToast("🗑️ تم الحذف");
-    } catch (e) {
-      console.error(e);
-      alert(e?.message || "فشل الحذف");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // ===== Salaries (using the same expenses table) =====
+  // ====================================================================
+  // 🔥 الحسابات التفاعلية المترابطة لنظام الرواتب والسلف برمجياً داخل React
+  // ====================================================================
   const salaryRows = useMemo(() => {
-    const arr = Array.isArray(rows) ? rows : [];
-    return arr
+    return (rows || [])
       .filter((r) => String(r.direction || "") === "expense")
       .filter((r) => {
         const c = String(r.category || "").trim();
-        const cl = c.toLowerCase();
-        return c === "رواتب" || c === "راتب" || cl === "salary" || c === "سلفة" || cl === "advance";
+        return c === "رواتب" || c === "سلف موظفين" || c === "سلفة";
       })
       .map((r) => {
         const cat = String(r.category || "").trim();
-        const cl = cat.toLowerCase();
-        const kind = cat === "سلفة" || cl === "advance" ? "advance" : "salary";
-        return { ...r, _emp: parseEmployee(r.note), _kind: kind };
+        const kind = cat === "سلف موظفين" || cat === "سلفة" ? "advance" : "salary";
+        let extractedMonth = "";
+        const mMatch = String(r.note || "").match(/شهر:\s*([^|\n]+)/);
+        if (mMatch) extractedMonth = mMatch[1].trim();
+        return { ...r, _emp: parseEmployee(r.note), _kind: kind, _month: extractedMonth };
       });
   }, [rows]);
+
+  const employeesList = useMemo(() => {
+    const set = new Set(["محمد", "الأنبط", "أبو مهند"]);
+    salaryRows.forEach(r => { if(r._emp) set.add(r._emp); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ar"));
+  }, [salaryRows]);
+
+  const currentEmpUnpaidAdvance = useMemo(() => {
+    if (!salEmployee) return 0;
+    const empMoves = salaryRows.filter(r => r._emp === salEmployee);
+    let totalAdv = 0; let totalRepaid = 0;
+    empMoves.forEach(r => {
+      if (r._kind === "advance") totalAdv += safeNum(r.amount);
+      if (String(r.note || "").includes("استقطاع سلفة")) {
+        const match = String(r.note || "").match(/استقطاع سلفة:\s*([\d.]+)/);
+        if (match) totalRepaid += safeNum(match[1]);
+      }
+    });
+    return Math.max(0, totalAdv - totalRepaid);
+  }, [salaryRows, salEmployee]);
+
+  const dynamicNetPayable = useMemo(() => {
+    const base = safeNum(salBaseAmount);
+    if (salType === "advance") return safeNum(salAmount);
+    return Math.max(0, base - currentEmpUnpaidAdvance);
+  }, [salBaseAmount, currentEmpUnpaidAdvance, salType, salAmount]);
+
+  useEffect(() => {
+    if (salType === "salary") setSalAmount(String(dynamicNetPayable));
+  }, [dynamicNetPayable, salType]);
 
   const salaryByEmployee = useMemo(() => {
     const map = new Map();
@@ -285,667 +209,250 @@ export default function Expenses() {
       const emp = r._emp || "غير محدد";
       if (!map.has(emp)) map.set(emp, { employee: emp, salary: 0, advance: 0, net: 0 });
       const it = map.get(emp);
-      const amt = safeNum(r.amount);
-      if (r._kind === "advance") it.advance += amt;
-      else it.salary += amt;
+      if (r._kind === "advance") it.advance += safeNum(r.amount);
+      else it.salary += safeNum(r.amount);
     }
-    const out = Array.from(map.values()).map((x) => ({ ...x, net: x.salary - x.advance }));
-    out.sort((a, b) => a.employee.localeCompare(b.employee, "ar"));
-    return out;
+    return Array.from(map.values()).map(x => ({ ...x, net: x.salary - x.advance }));
   }, [salaryRows]);
 
-  const salaryTotals = useMemo(() => {
-    let salary = 0;
-    let advance = 0;
-    for (const r of salaryRows) {
-      const amt = safeNum(r.amount);
-      if (r._kind === "advance") advance += amt;
-      else salary += amt;
-    }
-    return { salary, advance, net: salary - advance };
-  }, [salaryRows]);
+  const employeeStatementData = useMemo(() => {
+    if (!empFilter) return [];
+    const filteredMoves = salaryRows.filter(r => r._emp === empFilter && r.expense_date >= statementFrom && r.expense_date <= statementTo);
+    const sorted = [...filteredMoves].sort((a, b) => new Date(a.expense_date) - new Date(b.expense_date));
+    let currentBalance = 0;
+    return sorted.map(r => {
+      let debit = 0; let credit = 0;
+      if (r._kind === "advance") { debit = safeNum(r.amount); currentBalance += debit; }
+      else { credit = safeNum(r.amount); const advM = String(r.note || "").match(/استقطاع سلفة:\s*([\d.]+)/); currentBalance -= safeNum(advM ? advM[1] : 0); }
+      return { date: r.expense_date, kind: r._kind === "advance" ? "سلفة" : `راتب ${r._month}`, debit, credit, runningBalance: currentBalance, note: r.note };
+    });
+  }, [salaryRows, empFilter, statementFrom, statementTo]);
 
+  // ===== modal helpers =====
+  function resetForm() {
+    setEditId(null); setFDirection("expense"); setFExpenseDate(todayISO()); setFCategory(""); setFAmount(""); setFMethod("cash"); setFNote(""); setFCreatedAt(nowISO());
+  }
+
+  async function saveRow(e) {
+    e?.preventDefault?.();
+    const amt = safeNum(fAmount);
+    if (!String(fCategory || "").trim()) return alert("اكتب بند/نوع المصروف");
+    if (amt <= 0) return alert("اكتب مبلغ صحيح أكبر من الصفر");
+
+    setSaving(true);
+    try {
+      const payload = { expense_date: fExpenseDate, category: String(fCategory).trim(), amount: amt, direction: fDirection, method: fMethod, note: fNote || null, created_at: fCreatedAt || nowISO() };
+      if (editId) await supabase.from("expenses").update(payload).eq("id", editId);
+      else await supabase.from("expenses").insert(payload);
+      setOpen(false); resetForm(); await loadRows(); showToast("✅ تم الحفظ بنجاح");
+    } catch { alert("فشل الحفظ"); } finally { setSaving(false); }
+  }
+
+  async function delRow(id) {
+    if (!confirm("هل تريد حذف هذا السجل نهائياً؟")) return;
+    try {
+      setLoading(true);
+      await supabase.from("expenses").delete().eq("id", id);
+      await loadRows(); showToast("🗑️ تم الحذف");
+    } catch { alert("فشل الحذف"); } finally { setLoading(false); }
+  }
+
+  // 🔥 حفظ الراتب والسلف ومنع التكرار
   async function saveSalary() {
     const emp = String(salEmployee || "").trim();
     const amt = safeNum(salAmount);
-    if (!emp) return alert("اكتب اسم الموظف");
-    if (!amt || amt <= 0) return alert("اكتب مبلغ صحيح");
+    const base = safeNum(salBaseAmount);
+    if (!emp) return alert("الرجاء اختيار الموظف");
+    if (amt <= 0) return alert("الرجاء إدخال مبلغ صحيح");
 
-    const cat = salType === "advance" ? "سلفة" : "رواتب";
-    const payload = {
-      expense_date: salDate || todayISO(),
-      category: cat,
-      amount: amt,
-      direction: "expense",
-      method: salMethod || "cash",
-      note: buildEmpNote(emp, salNote),
-    };
-
-    const { error } = await supabase.from("expenses").insert(payload);
-    if (error) {
-      console.error("saveSalary error", error);
-      alert(error.message || "فشل الحفظ");
-      return;
+    if (salType === "salary") {
+      const isDuplicated = salaryRows.some(r => r._emp === emp && r._kind === "salary" && String(r._month) === String(salMonth));
+      if (isDuplicated) return alert(`⚠️ تم صرف راتب شهر (${salMonth}) مسبقاً لهذا الموظف!`);
     }
 
-    showToast("✅ تم حفظ العملية");
-    setSalAmount("");
-    setSalNote("");
-    // keep employee for faster entry
-    await loadRows();
+    setSaving(true);
+    try {
+      const cat = salType === "advance" ? "سلف موظفين" : "رواتب";
+      const payload = {
+        expense_date: salDate, category: cat, amount: amt, direction: "expense", method: salMethod,
+        note: salType === "advance" ? buildEmpNote(emp, salNote, "سلفة نقدية مستلمة") : buildEmpNote(emp, salNote, `الأساسي: ${base} | استقطاع سلفة: ${currentEmpUnpaidAdvance} | شهر: ${salMonth}`),
+        created_at: nowISO()
+      };
+      await supabase.from("expenses").insert(payload);
+      showToast("✅ تم تسجيل السند بنجاح");
+      setSalAmount(""); setSalNote(""); await loadRows();
+    } catch { alert("فشل الحفظ"); } finally { setSaving(false); }
   }
-
-  // ===== Statement computed =====
-  const statementEmp = String(empFilter || "").trim();
-  const statementRows = useMemo(() => {
-    if (!statementEmp) return [];
-    const s = statementEmp.toLowerCase();
-    return salaryRows.filter((r) => String(r._emp || "").toLowerCase().includes(s));
-  }, [salaryRows, statementEmp]);
-
-  const statementTotals = useMemo(() => {
-    let salary = 0;
-    let advance = 0;
-    for (const r of statementRows) {
-      const amt = safeNum(r.amount);
-      if (r._kind === "advance") advance += amt;
-      else salary += amt;
-    }
-    return { salary, advance, net: salary - advance };
-  }, [statementRows]);
-
-  // ===== Printing =====
-  function printExpensesReport() {
-    // print only expenses report area (filtered rows + totals)
-    setPrintMode("expenses");
-    setTimeout(() => window.print(), 60);
-    setTimeout(() => setPrintMode("none"), 800);
-  }
-
-  function printEmployeeStatement() {
-    // print only employee statement area
-    setPrintMode("employee");
-    setTimeout(() => window.print(), 60);
-    setTimeout(() => setPrintMode("none"), 800);
-  }
-
-  const printMeta = useMemo(() => {
-    const fromD = from || todayISO();
-    const toD = to || todayISO();
-    return {
-      from: fromD,
-      to: toD,
-      at: new Date().toLocaleString("ar-SA"),
-    };
-  }, [from, to]);
 
   return (
-    <div className="page" data-print-mode={printMode}>
-      {/* Print CSS: show only the chosen print area */}
-      <style>{`
-        @media print {
-          .no-print { display: none !important; }
-          body { background: #fff !important; }
-          body * { visibility: hidden; }
-          [data-print-area="expenses"], [data-print-area="expenses"] *,
-          [data-print-area="employee"], [data-print-area="employee"] * {
-            visibility: hidden;
-          }
+    <div className="page" style={{ padding: 18, direction: "rtl" }}>
+      {toast && <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 12, background: "rgba(54, 208, 170, 0.9)", color: "#fff" }}>{toast}</div>}
 
-          /* Show selected area */
-          .print-show { position: fixed; inset: 0; padding: 16px; }
-          .print-show, .print-show * { visibility: visible !important; }
-
-          .print-card { box-shadow: none !important; border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border: 1px solid #000; padding: 6px; text-align: center; }
-        }
-      `}</style>
-
-      {toast && <div className="toast">{toast}</div>}
-
-      <div className="page-head">
+      <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15 }}>
         <div>
-          <div className="badge">{tab === "expenses" ? "المصروفات والدخل" : "الرواتب والسلف"}</div>
-          <h2 style={{ margin: "8px 0 0" }}>{tab === "expenses" ? "سجل المصروفات والدخل" : "سجل الرواتب والسلف"}</h2>
-          <div style={{ color: "var(--muted)", fontSize: 12 }}>
-            {tab === "expenses"
-              ? "الصافي = الدخل − المصروف | صافي الكاش = دخل نقدي − مصروف نقدي"
-              : "الرواتب والسلف محفوظة داخل جدول المصروفات (expenses) بدون أي تعديل على قاعدة البيانات"}
-          </div>
+          <h2 style={{ margin: 0 }}>{tab === "expenses" ? "سجل المصروفات والدخل العامة" : "💼 دليل رواتب وسلف الموظفين"}</h2>
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>نظام ون نت المترابط لإدارة الحركات المالية والخزينة.</div>
         </div>
-
-        <div className="actions-row no-print">
-          {tab === "expenses" ? (
-            <>
-              <button className="btn" onClick={() => openNew("expense")}>+ مصروف</button>
-              <button className="btn btn-outline" onClick={() => openNew("income")}>+ دخل</button>
-              <button className="btn btn-outline" onClick={printExpensesReport} disabled={loading || filtered.length === 0}>
-                🖨️ طباعة التقرير
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn" onClick={saveSalary} disabled={loading}>+ إضافة راتب/سلفة</button>
-              <button className="btn btn-outline" onClick={printEmployeeStatement}>
-                🖨️ طباعة كشف الحساب
-              </button>
-            </>
-          )}
-          <button className="btn btn-outline" onClick={loadRows} disabled={loading}>تحديث</button>
-        </div>
-
-        <div className="no-print" style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <button
-            className={"btn btn-outline" + (tab === "expenses" ? " active" : "")}
-            onClick={() => setTab("expenses")}
-            type="button"
-          >
-            المصروفات / الدخل
-          </button>
-          <button
-            className={"btn btn-outline" + (tab === "salaries" ? " active" : "")}
-            onClick={() => setTab("salaries")}
-            type="button"
-          >
-            الرواتب / السلف
-          </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className={"btn " + (tab === "expenses" ? "btn-primary" : "btn-outline")} onClick={() => setTab("expenses")}>المصروفات / الدخل</button>
+          <button className={"btn " + (tab === "salaries" ? "btn-primary" : "btn-outline")} onClick={() => setTab("salaries")}>الرواتب / السلف</button>
         </div>
       </div>
 
-      {tab === "expenses" ? (
+      {/* ===================== TAB 1: المصروفات والدخل ===================== */}
+      {tab === "expenses" && (
         <>
-          {/* Filters */}
-          <div className="card no-print" style={{ marginBottom: 12 }}>
-            <div className="grid4">
-              <label>
-                من
-                <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                إلى
-                <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
+          <div className="card" style={{ padding: 16, marginBottom: 15 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid #ddd" }} />
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid #ddd" }} />
+              <select value={direction} onChange={(e) => setDirection(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid #ddd" }}><option value="all">كل الحركات</option><option value="expense">مصروفات</option><option value="income">إيرادات / دخل</option></select>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="بحث سري في القيود..." style={{ padding: 8, borderRadius: 8, border: "1px solid #ddd", flex: 1 }} />
+              <button className="btn btn-primary" onClick={() => setOpen(true)}>+ إضافة قيد جديد</button>
+            </div>
+            <div style={{ display: "flex", gap: 15, marginTop: 15, justifyContent: "flex-end" }}>
+              <div style={{ fontSize: 13 }}>إجمالي الدخل: <b style={{ color: "green" }}>{money(totals.income)}</b></div>
+              <div style={{ fontSize: 13 }}>إجمالي المصروف: <b style={{ color: "red" }}>{money(totals.expense)}</b></div>
+              <div style={{ fontSize: 13 }}>صافي الصندوق: <b>{money(totals.net)} ريال</b></div>
+            </div>
+          </div>
 
-              <label>
-                النوع
-                <select className="input" value={direction} onChange={(e) => setDirection(e.target.value)}>
-                  <option value="all">الكل</option>
-                  <option value="expense">مصروف</option>
-                  <option value="income">دخل</option>
-                </select>
-              </label>
+          <div className="card">
+            <div className="table-wrap">
+              <table className="table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr style={{ background: "#f5f5f5" }}><th>#</th><th>التاريخ</th><th>النوع</th><th>البند</th><th>الطريقة</th><th>المبلغ الصافي</th><th>بيان وملاحظة الحركة</th><th>إجراءات</th></tr></thead>
+                <tbody>
+                  {filtered.map((r, idx) => (
+                    <tr key={r.id}>
+                      <td>{idx + 1}</td><td>{toDateOnly(r.expense_date)}</td>
+                      <td><span className={"pill " + dirUi(r.direction).cls}>{dirUi(r.direction).ar}</span></td>
+                      <td>{r.category}</td><td>{r.method}</td><td><strong>{money(r.amount)}</strong></td><td>{r.note || "-"}</td>
+                      <td>
+                        <button onClick={() => { openEdit(r); }} style={{ marginLeft: 6 }}>تعديل</button>
+                        <button onClick={() => delRow(r.id)} style={{ color: "red" }}>حذف</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
-              <label>
-                طريقة الدفع
-                <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="all">الكل</option>
-                  <option value="cash">نقدي</option>
-                  <option value="bank">تحويل</option>
-                  <option value="other">أخرى</option>
-                </select>
-              </label>
+      {/* ===================== TAB 2: الرواتب والسلف الاحترافية المترابطة ===================== */}
+      {tab === "salaries" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 15 }}>
+            <div className="card" style={{ padding: 15, borderRight: "4px solid #3182ce" }}>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>💵 رواتب مصروفة نقدًا بالفترة</div>
+              <div style={{ fontSize: 24, fontWeight: "bold" }}>{money(salaryRows.filter(r=>r._kind==="salary").reduce((a,b)=>a+safeNum(b.amount),0))} ريال</div>
+            </div>
+            <div className="card" style={{ padding: 15, borderRight: "4px solid #dd6b20" }}>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>💸 سلف قائمة غير مستردة بالفترة</div>
+              <div style={{ fontSize: 24, fontWeight: "bold", color: "#dd6b20" }}>{money(salaryRows.filter(r=>r._kind==="advance").reduce((a,b)=>a+safeNum(b.amount),0))} ريال</div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20, alignItems: "start" }}>
+            <div className="card" style={{ padding: 20 }}>
+              <h3 style={{ margin: "0 0 15px 0", fontSize: 14 }}>صرف الرواتب والسلف</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label style={{ fontSize: 12 }}>التاريخ<input type="date" value={salDate} onChange={(e) => setSalDate(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }} /></label>
+                <label style={{ fontSize: 12 }}>الموظف المستهدف *
+                  <select value={salEmployee} onChange={(e) => setSalEmployee(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }}>
+                    <option value="">اختر الموظف...</option>
+                    {employeesList.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: 12 }}>نوع العملية<select value={salType} onChange={(e) => setSalType(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }}><option value="salary">صرف راتب شهري</option><option value="advance">تسجيل سلفة موظف</option></select></label>
+                {salType === "salary" ? (
+                  <label style={{ fontSize: 12 }}>الراتب الأساسي<input type="number" value={salBaseAmount} onChange={(e) => setSalBaseAmount(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }} /></label>
+                ) : (
+                  <label style={{ fontSize: 12 }}>مبلغ السلفة المطلوب<input type="number" value={salAmount} onChange={(e) => setSalAmount(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }} /></label>
+                )}
+                <label style={{ fontSize: 12 }}>الشهر المستهدف<select value={salMonth} onChange={(e) => setSalMonth(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }}><option value="يناير">يناير</option><option value="فبراير">فبراير</option><option value="مارس">مارس</option><option value="أبريل">أبريل</option><option value="مايو">مايو</option><option value="يونيو">يونيو</option><option value="يوليو">يوليو</option><option value="أغسطس">أغسطس</option><option value="سبتمبر">سبتمبر</option><option value="أكتوبر">أكتوبر</option><option value="نوفمبر">نوفمبر</option><option value="ديسمبر">ديسمبر</option></select></label>
+                <label style={{ fontSize: 12 }}>طريقة الدفع/الصرف<select value={salMethod} onChange={(e) => setSalMethod(e.target.value)} style={{ padding: 8, width: "100%", borderRadius: 8, border: "1px solid #ddd" }}><option value="cash">نقداً من الصندوق</option><option value="bank">تحويل بنكي</option></select></label>
+              </div>
+
+              {salEmployee && salType === "salary" && (
+                <div style={{ marginTop: 15, padding: 12, background: "rgba(220,100,50,0.06)", border: "1px dashed #dd6b20", borderRadius: 8, fontSize: 12 }}>
+                  💼 حوسبة مستحقات الموظف (<b>{salEmployee}</b>): <br/>
+                  - الراتب الأساسي القائم: <b>{money(salBaseAmount)} ريال</b> <br/>
+                  - مديونية السلف غير المسددة عليه: <b style={{ color: "red" }}>{money(currentEmpUnpaidAdvance)} ريال</b> <br/>
+                  <hr style={{ border: "none", borderTop: "1px solid #ddd", margin: "6px 0" }}/>
+                  - الصافي المستحق والمصروف كاش الآن: <b style={{ color: "green" }}>{money(dynamicNetPayable)} ريال</b>
+                </div>
+              )}
+
+              <button className="btn btn-primary" onClick={saveSalary} style={{ width: "100%", marginTop: 15, padding: 10 }}>💾 حفظ واعتماد السند المالي فورا</button>
             </div>
 
-            <div className="grid2" style={{ marginTop: 10 }}>
-              <label>
-                بحث
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="البند (راتب.. كهرباء..) أو ملاحظة أو ID"
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    onClick={() => setQ("")}
-                    style={{ whiteSpace: "nowrap" }}
-                  >
-                    مسح
-                  </button>
-                </div>
-              </label>
-
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي دخل</div>
-                  <div className="mini-value">{money(totals.income)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">إجمالي مصروف</div>
-                  <div className="mini-value">{money(totals.expense)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">الصافي</div>
-                  <div className="mini-value">{money(totals.net)}</div>
-                </div>
-                <div className="mini-card">
-                  <div className="mini-title">صافي الكاش</div>
-                  <div className="mini-value">{money(totals.cashNet)}</div>
-                </div>
+            <div className="card" style={{ padding: 20 }}>
+              <h3 style={{ margin: "0 0 15px 0", fontSize: 14 }}>أرصدة حسابات الموظفين الحالية</h3>
+              <div className="table-wrap" style={{ maxHeight: 280 }}>
+                <table className="table">
+                  <thead><tr><th>الموظف</th><th>رواتب</th><th>سلف قائمة</th><th>الصافي</th></tr></thead>
+                  <tbody>
+                    {salaryByEmployee.map(emp => (
+                      <tr key={emp.employee} onClick={() => setEmpFilter(emp.employee)} style={{ cursor: "pointer" }}>
+                        <td><strong>{emp.employee}</strong></td><td>{money(emp.salary)}</td><td style={{ color: "red" }}>{money(emp.advance)}</td><td><strong>{money(emp.net)}</strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
 
-          {/* Table */}
-          <div className="card">
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 15, flexWrap: "wrap", gap: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 14 }}>📊 كشف الحساب المالي للموظف</h3>
+              <div style={{ display: "flex", gap: 10 }}>
+                <select value={empFilter} onChange={(e) => setEmpFilter(e.target.value)} style={{ padding: 6, borderRadius: 8, border: "1px solid #ddd" }}><option value="">اختر الموظف...</option>{employeesList.map(n=><option key={n} value={n}>{n}</option>)}</select>
+                <input type="date" value={statementFrom} onChange={(e) => setStatementFrom(e.target.value)} style={{ padding: 6, borderRadius: 8, border: "1px solid #ddd" }} />
+                <input type="date" value={statementTo} onChange={(e) => setStatementTo(e.target.value)} style={{ padding: 6, borderRadius: 8, border: "1px solid #ddd" }} />
+              </div>
+            </div>
             <div className="table-wrap">
               <table className="table">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>التاريخ</th>
-                    <th>النوع</th>
-                    <th>البند</th>
-                    <th>طريقة</th>
-                    <th>المبلغ</th>
-                    <th>ملاحظة</th>
-                    <th className="no-print">إجراءات</th>
-                  </tr>
-                </thead>
+                <thead><tr><th>التاريخ</th><th>البيان المالي للحركة</th><th>مدين (سلفة +)</th><th>دائن (راتب -)</th><th>الرصيد المتبقي لدين السلفة</th></tr></thead>
                 <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: "center", color: "var(--muted)" }}>
-                        لا توجد بيانات
-                      </td>
-                    </tr>
+                  {employeeStatementData.length === 0 ? (
+                    <tr><td colSpan="5" style={{ textAlign: "center", color: "var(--muted)", padding: 15 }}>الرجاء اختيار اسم الموظف لمعاينة كشف حسابه المتصاعد</td></tr>
                   ) : (
-                    filtered.map((r, idx) => {
-                      const t = dirUi(r.direction);
-                      return (
-                        <tr key={r.id}>
-                          <td>{idx + 1}</td>
-                          <td>{toDateOnly(r.expense_date)}</td>
-                          <td>
-                            <span className={"pill " + t.cls}>{t.ar}</span>
-                          </td>
-                          <td>{r.category || "-"}</td>
-                          <td>{r.method || "-"}</td>
-                          <td style={{ fontWeight: 800 }}>{money(r.amount)}</td>
-                          <td style={{ maxWidth: 320, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {r.note || "-"}
-                          </td>
-                          <td className="no-print" style={{ display: "flex", gap: 8 }}>
-                            <button className="btn btn-outline" onClick={() => openEdit(r)}>تعديل</button>
-                            <button className="btn btn-danger" onClick={() => delRow(r.id)}>حذف</button>
-                          </td>
-                        </tr>
-                      );
-                    })
+                    employeeStatementData.map((row, i) => (
+                      <tr key={i}>
+                        <td>{row.date}</td><td><strong>{row.kind}</strong> <span style={{ fontSize: 11, color: "var(--muted)" }}>({row.note})</span></td>
+                        <td style={{ color: "red" }}>{row.debit > 0 ? money(row.debit) : ""}</td><td style={{ color: "green" }}>{row.credit > 0 ? money(row.credit) : ""}</td>
+                        <td><strong>{money(row.runningBalance)} ريال</strong></td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Modal */}
-          {open && (
-            <div className="modal-backdrop" onClick={() => setOpen(false)}>
-              <div
-                className="modal"
-                onClick={(e) => e.stopPropagation()}
-                style={{ width: "min(760px, 94vw)", maxHeight: "90vh", overflow: "auto" }}
-              >
-                <div className="modal-head">
-                  <div>
-                    <div className="badge">{editId ? "تعديل" : "جديد"}</div>
-                    <h3 style={{ margin: "6px 0 0" }}>{fDirection === "income" ? "دخل" : "مصروف"}</h3>
-                  </div>
-                  <button className="icon-btn" onClick={() => setOpen(false)}>✕</button>
-                </div>
-
-                <form onSubmit={saveRow}>
-                  <div className="grid2">
-                    <label>
-                      النوع
-                      <select className="input" value={fDirection} onChange={(e) => setFDirection(e.target.value)}>
-                        <option value="expense">مصروف</option>
-                        <option value="income">دخل</option>
-                      </select>
-                    </label>
-
-                    <label>
-                      طريقة الدفع
-                      <select className="input" value={fMethod} onChange={(e) => setFMethod(e.target.value)}>
-                        <option value="cash">نقدي</option>
-                        <option value="bank">تحويل</option>
-                        <option value="other">أخرى</option>
-                      </select>
-                    </label>
-
-                    <label>
-                      التاريخ (expense_date)
-                      <input
-                        className="input"
-                        type="date"
-                        value={fExpenseDate}
-                        onChange={(e) => setFExpenseDate(e.target.value)}
-                      />
-                    </label>
-
-                    <label>
-                      التاريخ/الوقت (created_at)
-                      <input
-                        className="input"
-                        type="datetime-local"
-                        value={(fCreatedAt || "").slice(0, 16)}
-                        onChange={(e) => setFCreatedAt(new Date(e.target.value).toISOString())}
-                      />
-                    </label>
-
-                    <label>
-                      البند / النوع
-                      <input
-                        className="input"
-                        value={fCategory}
-                        onChange={(e) => setFCategory(e.target.value)}
-                        placeholder="راتب، إيجار، كهرباء… أو دخل (تحويل، شحن...)"
-                      />
-                    </label>
-
-                    <label>
-                      المبلغ (موجب)
-                      <input
-                        className="input"
-                        type="number"
-                        step="0.01"
-                        value={fAmount}
-                        onChange={(e) => setFAmount(e.target.value)}
-                        placeholder="مثال: 2500"
-                      />
-                    </label>
-
-                    <label style={{ gridColumn: "1 / -1" }}>
-                      ملاحظة
-                      <input
-                        className="input"
-                        value={fNote}
-                        onChange={(e) => setFNote(e.target.value)}
-                        placeholder="اختياري"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="modal-actions">
-                    <button type="button" className="btn btn-outline" onClick={() => setOpen(false)}>
-                      إلغاء
-                    </button>
-                    <button className="btn" type="submit" disabled={saving}>
-                      {saving ? "جارٍ الحفظ..." : "حفظ"}
-                    </button>
-                  </div>
-
-                  <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 10 }}>
-                    ملاحظة: المبلغ يُحفظ موجب دائمًا، والاتجاه يحدد (دخل/مصروف) داخل التقارير.
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Printable Expenses Report */}
-          <div
-            data-print-area="expenses"
-            className={printMode === "expenses" ? "print-show" : ""}
-          >
-            {printMode === "expenses" && (
-              <div className="print-card">
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 900 }}>تقرير المصروفات والدخل</div>
-                    <div style={{ marginTop: 4, fontSize: 12 }}>الفترة: {printMeta.from} → {printMeta.to}</div>
-                    <div style={{ marginTop: 4, fontSize: 12 }}>تاريخ الطباعة: {printMeta.at}</div>
-                  </div>
-                  <div style={{ textAlign: "left", fontSize: 12 }}>
-                    <div><b>إجمالي دخل:</b> {money(totals.income)}</div>
-                    <div><b>إجمالي مصروف:</b> {money(totals.expense)}</div>
-                    <div><b>الصافي:</b> {money(totals.net)}</div>
-                    <div><b>صافي الكاش:</b> {money(totals.cashNet)}</div>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12 }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>التاريخ</th>
-                        <th>النوع</th>
-                        <th>البند</th>
-                        <th>الطريقة</th>
-                        <th>المبلغ</th>
-                        <th>ملاحظة</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.length ? (
-                        filtered.map((r, idx) => (
-                          <tr key={r.id}>
-                            <td>{idx + 1}</td>
-                            <td>{toDateOnly(r.expense_date)}</td>
-                            <td>{String(r.direction) === "income" ? "دخل" : "مصروف"}</td>
-                            <td>{r.category || "-"}</td>
-                            <td>{r.method || "-"}</td>
-                            <td>{money(r.amount)}</td>
-                            <td style={{ textAlign: "right" }}>{r.note || "-"}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr><td colSpan={7}>لا توجد بيانات</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", gap: 20 }}>
-                  <div style={{ width: "45%" }}>
-                    <div style={{ fontWeight: 800, marginBottom: 10 }}>التوقيع</div>
-                    <div style={{ borderBottom: "1px solid #000", height: 28 }} />
-                  </div>
-                  <div style={{ width: "45%" }}>
-                    <div style={{ fontWeight: 800, marginBottom: 10 }}>الختم</div>
-                    <div style={{ border: "1px dashed #000", height: 60, borderRadius: 8 }} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Salaries Tab */}
-          <div className="card" style={{ marginTop: 14 }}>
-            <div className="cardHead">
-              <div>
-                <div className="cardTitle">إضافة راتب / سلفة</div>
-                <div className="muted">يتم الحفظ في جدول المصروفات (expenses) ضمن تصنيفات: رواتب / سلفة</div>
-              </div>
-            </div>
-
-            <div className="cardBody">
-              <div className="grid2">
-                <div className="field">
-                  <label>التاريخ</label>
-                  <input type="date" value={salDate} onChange={(e) => setSalDate(e.target.value)} />
-                </div>
-                <div className="field">
-                  <label>الموظف</label>
-                  <input value={salEmployee} onChange={(e) => setSalEmployee(e.target.value)} placeholder="اسم الموظف" />
-                </div>
-
-                <div className="field">
-                  <label>النوع</label>
-                  <select value={salType} onChange={(e) => setSalType(e.target.value)}>
-                    <option value="salary">راتب</option>
-                    <option value="advance">سلفة</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label>المبلغ</label>
-                  <input value={salAmount} onChange={(e) => setSalAmount(e.target.value)} placeholder="0" inputMode="decimal" />
-                </div>
-
-                <div className="field">
-                  <label>الطريقة</label>
-                  <select value={salMethod} onChange={(e) => setSalMethod(e.target.value)}>
-                    <option value="cash">نقداً</option>
-                    <option value="bank">تحويل/بنك</option>
-                    <option value="other">أخرى</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label>ملاحظة (اختياري)</label>
-                  <input value={salNote} onChange={(e) => setSalNote(e.target.value)} placeholder="مثال: شهر ديسمبر" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="statsRow" style={{ marginTop: 14 }}>
-            <div className="stat">
-              <div className="statLabel">إجمالي الرواتب</div>
-              <div className="statValue">{money(salaryTotals.salary)}</div>
-            </div>
-            <div className="stat">
-              <div className="statLabel">إجمالي السلف</div>
-              <div className="statValue">{money(salaryTotals.advance)}</div>
-            </div>
-            <div className="stat">
-              <div className="statLabel">صافي الرواتب</div>
-              <div className="statValue">{money(salaryTotals.net)}</div>
-            </div>
-          </div>
-
-          <div className="card" style={{ marginTop: 14 }}>
-            <div className="cardHead">
-              <div>
-                <div className="cardTitle">كشف رواتب حسب الموظف</div>
-                <div className="muted">الراتب − السلفة = الصافي</div>
-              </div>
-            </div>
-            <div className="cardBody">
-              <div className="no-print" style={{ display: "flex", gap: 10, alignItems: "end", marginBottom: 10, flexWrap: "wrap" }}>
-                <label style={{ flex: 1, minWidth: 220 }}>
-                  اختر الموظف للطباعة
-                  <input
-                    className="input"
-                    placeholder="اكتب اسم الموظف"
-                    value={empFilter}
-                    onChange={(e) => setEmpFilter(e.target.value)}
-                  />
-                </label>
-                <button className="btn btn-outline" onClick={printEmployeeStatement}>
-                  🖨️ طباعة كشف الحساب
-                </button>
-              </div>
-
-              <div className="tableWrap no-print">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>الموظف</th>
-                      <th>رواتب</th>
-                      <th>سلف</th>
-                      <th>الصافي</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {salaryByEmployee.length ? (
-                      salaryByEmployee.map((r) => (
-                        <tr key={r.employee}>
-                          <td>{r.employee}</td>
-                          <td>{money(r.salary)}</td>
-                          <td>{money(r.advance)}</td>
-                          <td>{money(r.net)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={4} className="noData">لا توجد بيانات رواتب/سلف للفترة المختارة</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="muted no-print" style={{ marginTop: 8 }}>
-                ملاحظة: يتم أخذ اسم الموظف من الملاحظة بصيغة <b>الموظف: الاسم</b> (النظام يضيفها تلقائياً عند الحفظ).
-              </div>
-            </div>
-          </div>
-
-          {/* Printable Employee Statement */}
-          <div
-            data-print-area="employee"
-            className={printMode === "employee" ? "print-show" : ""}
-          >
-            {printMode === "employee" && (
-              <div className="print-card">
-                <div style={{ textAlign: "center", marginBottom: 10 }}>
-                  <h2 style={{ margin: 0 }}>كشف حساب رواتب</h2>
-                  <div style={{ marginTop: 6 }}>الموظف: <b>{statementEmp || "—"}</b></div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "#444" }}>تاريخ الطباعة: {new Date().toLocaleString("ar-SA")}</div>
-                </div>
-
-                <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 10, flexWrap: "wrap" }}>
-                  <div><b>إجمالي الرواتب:</b> {money(statementTotals.salary)}</div>
-                  <div><b>إجمالي السلف:</b> {money(statementTotals.advance)}</div>
-                  <div><b>الصافي:</b> {money(statementTotals.net)}</div>
-                </div>
-
-                <table>
-                  <thead>
-                    <tr>
-                      <th>التاريخ</th>
-                      <th>النوع</th>
-                      <th>المبلغ</th>
-                      <th>ملاحظة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statementEmp ? (
-                      statementRows.length ? (
-                        statementRows.map((r) => (
-                          <tr key={r.id}>
-                            <td>{toDateOnly(r.expense_date)}</td>
-                            <td>{r._kind === "advance" ? "سلفة" : "راتب"}</td>
-                            <td>{money(r.amount)}</td>
-                            <td style={{ textAlign: "right" }}>{r.note || "-"}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={4}>لا توجد حركات لهذا الموظف ضمن الفترة</td>
-                        </tr>
-                      )
-                    ) : (
-                      <tr>
-                        <td colSpan={4}>اكتب اسم الموظف في خانة "اختر الموظف للطباعة" ثم اضغط طباعة</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-
-                <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", gap: 20 }}>
-                  <div style={{ width: "45%" }}>
-                    <div style={{ fontWeight: 800, marginBottom: 10 }}>التوقيع</div>
-                    <div style={{ borderBottom: "1px solid #000", height: 28 }} />
-                  </div>
-                  <div style={{ width: "45%" }}>
-                    <div style={{ fontWeight: 800, marginBottom: 10 }}>الختم</div>
-                    <div style={{ border: "1px dashed #000", height: 60, borderRadius: 8 }} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+      {/* Modal لإنشاء حركات المصروفات العامة */}
+      {open && (
+        <div className="modal-backdrop" onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}><div className="modal" onClick={e=>e.stopPropagation()} style={{ background: "var(--panel)", padding: 20, borderRadius: 12, width: "90%", maxWidth: 500 }}><form onSubmit={saveRow}><h3>إضافة قيد حركة جديدة</h3><div style={{ display: "grid", gap: 10 }}><label style={{ fontSize: 12 }}>النوع<select value={fDirection} onChange={e=>setFDirection(e.target.value)} style={{ padding: 8, width: "100%" }}><option value="expense">مصروف</option><option value="income">دخل</option></select></label><label style={{ fontSize: 12 }}>البند / التصنيف<input value={fCategory} onChange={e=>setFCategory(e.target.value)} placeholder="مثال: كهرباء، إيجار، ماء" style={{ padding: 8, width: "100%" }} /></label><label style={{ fontSize: 12 }}>المبلغ<input type="number" step="0.01" value={fAmount} onChange={e=>setFAmount(e.target.value)} style={{ padding: 8, width: "100%" }} /></label><label style={{ fontSize: 12 }}>طريقة الصرف<select value={fMethod} onChange={e=>setFMethod(e.target.value)} style={{ padding: 8, width: "100%" }}><option value="cash">نقدي</option><option value="bank">تحويل</option></select></label><label style={{ fontSize: 12 }}>ملاحظات عامة<input value={fNote} onChange={e=>setFNote(e.target.value)} style={{ padding: 8, width: "100%" }} /></label></div><div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 15 }}><button type="submit" className="btn btn-primary">حفظ القيد</button><button type="button" onClick={()=>setOpen(false)} className="btn btn-outline">إلغاء</button></div></form></div></div>
       )}
     </div>
   );
 }
+
+// ===== Styles =====
+const styles = {
+  headerRow: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 14 },
+  tabs: { display: "flex", gap: 8, flexWrap: "wrap" },
+  tab: { padding: "10px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text)", cursor: "pointer" },
+  tabActive: { padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(54, 208, 170, 0.5)", background: "rgba(54, 208, 170, 0.18)", color: "var(--text)", cursor: "pointer" },
+  card: { padding: 16, borderRadius: 18, background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text)" },
+  label: { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, width: "100%" },
+  input: { padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "rgba(0,0,0,0.15)", color: "var(--text)", outline: "none", width: "100%" },
+  tableWrap: { marginTop: 12, overflowX: "auto", overflowY: "auto", maxHeight: 360, borderRadius: 14, border: "1px solid var(--border)" },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: 700 }
+};
