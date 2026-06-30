@@ -159,7 +159,9 @@ export default function Invoices() {
   const [payMethod, setPayMethod] = useState("cash");
   const [payRef, setPayRef] = useState("");
   const [payNote, setPayNote] = useState("");
-  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  
+  // 🔥 جعل حقل تاريخ السداد يستقبل صيغة كاملة مع الوقت للتعديل يدوياً
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 16));
 
   const didInit = useRef(false);
 
@@ -436,7 +438,7 @@ export default function Invoices() {
       });
     } catch (e) {
       console.error(e);
-    } finally {
+    }_final {
       setCashierLoading(false);
     }
   };
@@ -977,7 +979,9 @@ export default function Invoices() {
     setPayMethod("cash");
     setPayRef("");
     setPayNote("");
-    setPayDate(new Date().toISOString().slice(0, 10));
+    
+    // 🔥 جعل التوقيت الافتراضي عند فتح نافذة السداد يستقبل صيغة كاملة مع الوقت للتعديل يدوياً
+    setPayDate(new Date().toISOString().slice(0, 16));
     setPayModalOpen(true);
   }
 
@@ -1000,8 +1004,16 @@ export default function Invoices() {
 
       if (payMethod !== "from_balance") {
         const { error: pErr } = await supabase.from("payments").insert({
-          customer_id: invRow.customer_id, invoice_id: invId, pay_date: payDate, amount: amt, payment_type: "invoice", method: payMethod, reference: payRef || null, note: payNote || null,
-          created_at: `${payDate}T12:00:00.000+03:00`, seller_user_id: user?.id || null,
+          customer_id: invRow.customer_id, 
+          invoice_id: invId, 
+          pay_date: payDate.slice(0, 10), // حفظ التاريخ الصافي لليومية (YYYY-MM-DD)
+          amount: amt, 
+          payment_type: "invoice", 
+          method: payMethod, 
+          reference: payRef || null, 
+          note: payNote || null,
+          created_at: `${payDate.slice(0, 10)}T${payDate.slice(11, 16)}:00.000+03:00`, // تمرير الوقت المعدل بالكامل مع التوقيت السعودي لحل الاختفاء
+          seller_user_id: user?.id || null,
         });
         if (pErr) throw pErr;
       }
@@ -1064,7 +1076,7 @@ export default function Invoices() {
           <tr>
             <td>
               <h2>${networkSettings.name}</h2>
-              <div style="font-size:11px; color:#555; margin-top:3px;">هاتف: ${networkSettings.phone} |العنوان: ${networkSettings.address}</div>
+              <div style="font-size:11px; color:#555; margin-top:3px;">هاتف: ${networkSettings.phone} | العنوان: ${networkSettings.address}</div>
             </td>
             <td style="text-align:left; vertical-align:top;">
               ${networkSettings.logo ? `<img src="${networkSettings.logo}" class="logo-img" />` : ""}
@@ -1129,7 +1141,7 @@ export default function Invoices() {
   return (
     <div style={{ padding: 18, direction: "rtl" }}>
       {toast.open && (
-        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 14, border: toast.type === "ok" ? "1px solid rgba(54, 208, 170, 0.55)" : "1px solid rgba(255, 90, 90, 0.55)", background: toast.type === "ok" ? "rgba(54, 208, 170, 0.18)" : "rgba(255, 90, 90, 0.18)", color: "#fff", minWidth: 260, maxWidth: 520, backdropFilter: "blur(10px)" }}>
+        <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 14, border: toast.type === "ok" ? "1px solid rgba(54, 208, 170, 0.55)" : "1px solid rgba(255, 90, 90, 0.55)", background: toast.type === "ok" ? "rgba(54, 208, 170, 0.18)" : "rgba(255, 90, 90, 0.18)", color: "#fff", minWidth: 260, backdropFilter: "blur(10px)" }}>
           {toast.text}
         </div>
       )}
@@ -1411,8 +1423,17 @@ export default function Invoices() {
           <div style={styles.modal}>
             <h3>سداد فاتورة #{payInvoice?.number || payInvoice?.id}</h3>
             <div style={styles.payHint}>المتبقي القائم للفاتورة: <b>{money(payInvoice?.remaining_amount)} ريال</b></div>
+            
             <div style={styles.grid2}>
+              {/* 🔥 تعديل حقل تاريخ السداد ليكون تفاعلياً بالكامل مع الوقت ويقبل التعديل لأيام سابقة يدويّاً */}
+              <label style={styles.label}>تاريخ ووقت السداد المستهدف
+                <input type="datetime-local" value={payDate} onChange={(e) => setPayDate(e.target.value)} style={styles.input} />
+              </label>
+              
               <label style={styles.label}>مبلغ التحصيل المستلم<input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} /></label>
+            </div>
+
+            <div style={styles.grid2} style={{ marginTop: 10 }}>
               <label style={styles.label}>طريقة التحصيل
                 <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={styles.input}>
                   <option value="cash">نقدي (كاش الصندوق)</option>
@@ -1420,7 +1441,17 @@ export default function Invoices() {
                   <option value="from_balance">خصم من رصيد العميل المسبق</option>
                 </select>
               </label>
+              <label style={styles.label}>مرجع / رقم العملية (اختياري)
+                <input style={styles.input} value={payRef} onChange={(e)=>setPayRef(e.target.value)} placeholder="رقم العملية / إيصال" />
+              </label>
             </div>
+
+            <div style={styles.grid1} style={{ marginTop: 10 }}>
+              <label style={styles.label}>ملاحظة السند
+                <input value={payNote} onChange={(e) => setPayNote(e.target.value)} style={styles.input} placeholder="ملاحظات اختيارية..." />
+              </label>
+            </div>
+
             <div style={{ display: "flex", gap: 10, justifyContent: "end", marginTop: 15 }}>
               <button onClick={doPay} style={styles.btnPrimary}>تأكيد واعتماد السند المالي</button>
               <button onClick={() => setPayModalOpen(false)} style={styles.btnGhost}>إلغاء</button>
@@ -1442,6 +1473,7 @@ const styles = {
   editBar: { marginBottom: 12, padding: "10px 12px", borderRadius: 14, border: "1px solid rgba(255, 200, 70, 0.35)", background: "rgba(255, 200, 70, 0.10)", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" },
   payHint: { marginTop: 10, marginBottom: 10, padding: "10px 12px", border: "1px solid var(--border)", background: "var(--panel)", borderRadius: 12 },
   subTitle: { fontSize: 14, fontWeight: "bold", margin: "12px 0" },
+  grid1: { display: "grid", gridTemplateColumns: "1fr", gap: 12 },
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
   grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 },
   grid4: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 12 },
