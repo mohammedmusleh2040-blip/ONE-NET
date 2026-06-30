@@ -437,7 +437,6 @@ export default function Invoices() {
     } catch (e) {
       console.error(e);
     } finally {
-      // ✅ تصحيح الكلمة البرمجية هنا لتمرير الـ Build بنجاح
       setCashierLoading(false);
     }
   };
@@ -669,7 +668,7 @@ export default function Invoices() {
   async function voidInvoice(inv) {
     if (!inv?.id) return;
     if (safeNum(inv.paid_amount) > 0) return showToast("لا يمكن إلغاء فاتورة عليها سداد. استخدم (مرتجع).", "warn");
-    if (!window.confirm("إلغاء الفاتورة وإرجاع المخزون؟")) return;
+    if (!window.confirm("إلغاء الفاتورة وإرجاع المخزون?")) return;
 
     try {
       setLoading(true);
@@ -869,15 +868,33 @@ export default function Invoices() {
         }
 
         await supabase.from("invoice_line_items").delete().eq("invoice_id", invoiceId);
-        const { data: upInv } = await supabase.from("invoices").update(invRow).eq("id", invoiceId).select("*").single();
-        invNumber = upInv.number || upInv.id;
+        
+        // حدّث رأس الفاتورة (السطر 872 الموضح في اللقطة)
+        const { data: upInv, error: eUp } = await supabase.from("invoices").update(invRow).eq("id", invoiceId).select("*").single();[cite: 1]
+        if (eUp) throw eUp;[cite: 1]
+        invNumber = upInv.number || upInv.id;[cite: 1]
 
-        if (invoiceType === "cards") {
-          const lineRows = lines.map((l) => ({ invoice_id: invoiceId, card_type_id: l.card_type_id, qty: safeNum(l.qty), price: safeNum(l.price), line_total: safeNum(l.line_total) }));
-          await supabase.from("invoice_line_items").insert(lineRows);
+        // 🔥 تطبيق الاقتراح والميزة الذكية لـ ONE-NET ERP:
+        // يسأل النظام المحاسب فوراً عما إذا كان يريد تحديث تاريخ السندات التلقائية المربوطة بالفاتورة أم لا
+        const shouldUpdatePayments = window.confirm("هل تريد أيضًا تعديل تواريخ سندات القبض المرتبطة بهذه الفاتورة لتطابق التاريخ الجديد؟");
+        if (shouldUpdatePayments) {
+          try {
+            await supabase.from("payments").update({
+              pay_date: invoiceDate.slice(0, 10),
+              created_at: `${invoiceDate.slice(0, 10)}T${invoiceDate.slice(11, 16)}:00.000+03:00`
+            }).eq("invoice_id", invoiceId).eq("payment_type", "invoice"); // تحديث السند التلقائي الصادر من دالة الفاتورة فقط، ولا يلمس السندات اليدوية لاحقاً
+          } catch (payUpErr) {
+            console.warn("تعذر تحديث السندات التلقائية المرتبطة:", payUpErr);
+          }
+        }
+
+        if (invoiceType === "cards") {[cite: 1]
+          const lineRows = lines.map((l) => ({ invoice_id: invoiceId, card_type_id: l.card_type_id, qty: safeNum(l.qty), price: safeNum(l.price), line_total: safeNum(l.line_total) }));[cite: 1]
+          await supabase.from("invoice_line_items").insert(lineRows);[cite: 1]
         } else {
           const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
-          await supabase.from("invoice_line_items").insert({ invoice_id: invoiceId, prev_reading_gb: safeNum(prevReading), curr_reading_gb: safeNum(currReading), usage_gb: usage, price_per_gb: safeNum(pricePerGb), line_total: usage * safeNum(pricePerGb) });
+          const lineTotal = usage * safeNum(pricePerGb);
+          await supabase.from("invoice_line_items").insert({ invoice_id: invoiceId, prev_reading_gb: safeNum(prevReading), curr_reading_gb: safeNum(currReading), usage_gb: usage, price_per_gb: safeNum(pricePerGb), line_total: lineTotal });
           await supabase.from("customers").update({ last_reading_gb: safeNum(currReading) }).eq("id", Number(customerId));
         }
 
@@ -1165,7 +1182,7 @@ export default function Invoices() {
 
       {canUseCashier && posMode && (
         <div style={{ ...styles.card, marginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifycontent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 16 }}>🧾 كاشير البائع (ملخص الفترة)</div>
             </div>
