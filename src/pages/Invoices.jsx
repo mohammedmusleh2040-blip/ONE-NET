@@ -159,8 +159,6 @@ export default function Invoices() {
   const [payMethod, setPayMethod] = useState("cash");
   const [payRef, setPayRef] = useState("");
   const [payNote, setPayNote] = useState("");
-  
-  // 🔥 جعل حقل تاريخ السداد يستقبل صيغة كاملة مع الوقت للتعديل يدوياً
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 16));
 
   const didInit = useRef(false);
@@ -438,7 +436,8 @@ export default function Invoices() {
       });
     } catch (e) {
       console.error(e);
-    }_final {
+    } finally {
+      // ✅ تصحيح الكلمة البرمجية هنا لتمرير الـ Build بنجاح
       setCashierLoading(false);
     }
   };
@@ -609,7 +608,7 @@ export default function Invoices() {
         <table class="header-table">
           <tr>
             <td>
-              <h2 style="margin:0; color:#2b6cb0;">${networkSettings.name}</h2>
+              <h2>${networkSettings.name}</h2>
               <div style="font-size:12px; color:#555; margin-top:4px;">هاتف: ${networkSettings.phone} | العنوان: ${networkSettings.address}</div>
             </td>
             <td class="logo-area">
@@ -911,7 +910,8 @@ export default function Invoices() {
         await supabase.from("invoice_line_items").insert(lineRows);
       } else {
         const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
-        await supabase.from("invoice_line_items").insert({ invoice_id: invoiceId, prev_reading_gb: safeNum(prevReading), curr_reading_gb: safeNum(currReading), usage_gb: usage, price_per_gb: safeNum(pricePerGb), line_total: usage * safeNum(pricePerGb) });
+        const lineTotal = usage * safeNum(pricePerGb);
+        await supabase.from("invoice_line_items").insert({ invoice_id: invoiceId, prev_reading_gb: safeNum(prevReading), curr_reading_gb: safeNum(currReading), usage_gb: usage, price_per_gb: safeNum(pricePerGb), line_total: lineTotal });
         await supabase.from("customers").update({ last_reading_gb: safeNum(currReading) }).eq("id", Number(customerId));
       }
 
@@ -979,8 +979,6 @@ export default function Invoices() {
     setPayMethod("cash");
     setPayRef("");
     setPayNote("");
-    
-    // 🔥 جعل التوقيت الافتراضي عند فتح نافذة السداد يستقبل صيغة كاملة مع الوقت للتعديل يدوياً
     setPayDate(new Date().toISOString().slice(0, 16));
     setPayModalOpen(true);
   }
@@ -1006,13 +1004,13 @@ export default function Invoices() {
         const { error: pErr } = await supabase.from("payments").insert({
           customer_id: invRow.customer_id, 
           invoice_id: invId, 
-          pay_date: payDate.slice(0, 10), // حفظ التاريخ الصافي لليومية (YYYY-MM-DD)
+          pay_date: payDate.slice(0, 10), 
           amount: amt, 
           payment_type: "invoice", 
           method: payMethod, 
           reference: payRef || null, 
           note: payNote || null,
-          created_at: `${payDate.slice(0, 10)}T${payDate.slice(11, 16)}:00.000+03:00`, // تمرير الوقت المعدل بالكامل مع التوقيت السعودي لحل الاختفاء
+          created_at: `${payDate.slice(0, 10)}T${payDate.slice(11, 16)}:00.000+03:00`, 
           seller_user_id: user?.id || null,
         });
         if (pErr) throw pErr;
@@ -1167,7 +1165,7 @@ export default function Invoices() {
 
       {canUseCashier && posMode && (
         <div style={{ ...styles.card, marginTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", justifycontent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 16 }}>🧾 كاشير البائع (ملخص الفترة)</div>
             </div>
@@ -1425,7 +1423,6 @@ export default function Invoices() {
             <div style={styles.payHint}>المتبقي القائم للفاتورة: <b>{money(payInvoice?.remaining_amount)} ريال</b></div>
             
             <div style={styles.grid2}>
-              {/* 🔥 تعديل حقل تاريخ السداد ليكون تفاعلياً بالكامل مع الوقت ويقبل التعديل لأيام سابقة يدويّاً */}
               <label style={styles.label}>تاريخ ووقت السداد المستهدف
                 <input type="datetime-local" value={payDate} onChange={(e) => setPayDate(e.target.value)} style={styles.input} />
               </label>
