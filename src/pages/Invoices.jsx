@@ -668,7 +668,7 @@ export default function Invoices() {
   async function voidInvoice(inv) {
     if (!inv?.id) return;
     if (safeNum(inv.paid_amount) > 0) return showToast("لا يمكن إلغاء فاتورة عليها سداد. استخدم (مرتجع).", "warn");
-    if (!window.confirm("إلغاء الفاتورة وإرجاع المخزون?")) return;
+    if (!window.confirm("إلغاء الفاتورة وإرجاع المخزون؟")) return;
 
     try {
       setLoading(true);
@@ -755,7 +755,9 @@ export default function Invoices() {
   async function startEdit(inv) {
     try {
       setLoading(true);
-      const { data: invRow } = await supabase.from("invoices").select("*").eq("id", inv.id).single();
+      const { data: invRow } = await supabase.from("invoices").select("*").eq("id", inv.id).maybeSingle();
+      if (!invRow) return showToast("الفاتورة غير موجودة", "err");
+
       const invLines = await fetchInvoiceLines(inv.id);
 
       setEditMode(true);
@@ -869,28 +871,27 @@ export default function Invoices() {
 
         await supabase.from("invoice_line_items").delete().eq("invoice_id", invoiceId);
         
-        // حدّث رأس الفاتورة (السطر 872 الموضح في اللقطة)
-        const { data: upInv, error: eUp } = await supabase.from("invoices").update(invRow).eq("id", invoiceId).select("*").single();[cite: 1]
-        if (eUp) throw eUp;[cite: 1]
-        invNumber = upInv.number || upInv.id;[cite: 1]
+        // حدّث رأس الفاتورة بعد تنظيف السطر تماماً
+        const { data: upInv, error: eUp } = await supabase.from("invoices").update(invRow).eq("id", invoiceId).select("*").single();
+        if (eUp) throw eUp;
+        invNumber = upInv.number || upInv.id;
 
-        // 🔥 تطبيق الاقتراح والميزة الذكية لـ ONE-NET ERP:
-        // يسأل النظام المحاسب فوراً عما إذا كان يريد تحديث تاريخ السندات التلقائية المربوطة بالفاتورة أم لا
+        // ميزة المزامنة المالية وسؤال المحاسب
         const shouldUpdatePayments = window.confirm("هل تريد أيضًا تعديل تواريخ سندات القبض المرتبطة بهذه الفاتورة لتطابق التاريخ الجديد؟");
         if (shouldUpdatePayments) {
           try {
             await supabase.from("payments").update({
               pay_date: invoiceDate.slice(0, 10),
               created_at: `${invoiceDate.slice(0, 10)}T${invoiceDate.slice(11, 16)}:00.000+03:00`
-            }).eq("invoice_id", invoiceId).eq("payment_type", "invoice"); // تحديث السند التلقائي الصادر من دالة الفاتورة فقط، ولا يلمس السندات اليدوية لاحقاً
+            }).eq("invoice_id", invoiceId).eq("payment_type", "invoice");
           } catch (payUpErr) {
             console.warn("تعذر تحديث السندات التلقائية المرتبطة:", payUpErr);
           }
         }
 
-        if (invoiceType === "cards") {[cite: 1]
-          const lineRows = lines.map((l) => ({ invoice_id: invoiceId, card_type_id: l.card_type_id, qty: safeNum(l.qty), price: safeNum(l.price), line_total: safeNum(l.line_total) }));[cite: 1]
-          await supabase.from("invoice_line_items").insert(lineRows);[cite: 1]
+        if (invoiceType === "cards") {
+          const lineRows = lines.map((l) => ({ invoice_id: invoiceId, card_type_id: l.card_type_id, qty: safeNum(l.qty), price: safeNum(l.price), line_total: safeNum(l.line_total) }));
+          await supabase.from("invoice_line_items").insert(lineRows);
         } else {
           const usage = Math.max(0, safeNum(currReading) - safeNum(prevReading));
           const lineTotal = usage * safeNum(pricePerGb);
@@ -909,13 +910,13 @@ export default function Invoices() {
 
       const { data: existing } = await supabase.from("invoices").select("id,number").eq("client_uid", uid).maybeSingle();
       if (existing?.id) {
-        showToast(`هذه الفاتورة محفوظة مسبقاً`, "warn");
+        showToast("هذه الفاتورة محفوظة مسبقاً", "warn");
         setTab("list");
         return;
       }
 
-      const { data: inserted, error: insErr } = await supabase.from("invoices").insert(invRow).select("*").single();
-      if (insErr) throw insErr;
+      const { data: inserted, error: invErr } = await supabase.from("invoices").insert(invRow).select("*").single();
+      if (invErr) throw invErr;
 
       invoiceId = inserted.id;
       const number = `INV-${String(invoiceId).padStart(6, "0")}`;
