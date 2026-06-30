@@ -27,7 +27,6 @@ function toDateOnly(isoOrDateLike) {
   }
 }
 
-// دالة تفكيك اسم الموظف والبيانات المحاسبية من الملاحظات
 const parseEmployee = (note) => {
   const s = String(note || "").trim();
   if (!s) return "";
@@ -54,7 +53,7 @@ export default function Expenses() {
   const [tab, setTab] = useState("expenses"); // expenses | salaries
   const [printMode, setPrintMode] = useState("none"); // none | expenses | employee
 
-  // Filters (TAB 1)
+  // Filters (TAB 1) - مرتبطة كلياً بالـ useEffect لإصلاح خلل التواريخ
   const [q, setQ] = useState("");
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
@@ -66,7 +65,7 @@ export default function Expenses() {
     const saved = localStorage.getItem("one_net_employees");
     return saved ? JSON.parse(saved) : [
       { id: "1", name: "أحمد", role: "إنتاج", salary: 4000, date: "2025-01-15", status: "نشط", notes: "مصنع الكروت" },
-      { id: "2", name: "محمد", role: "صيانة شبكات", salary: 4500, date: "2024-06-01", status: "نشط", notes: "إدارة ون نت" },
+      { id: "2", name: "محمد", role: "صيانة شبكات", salary: 4500, date: "2024-06-01", status: "نشض", notes: "إدارة ون نت" },
       { id: "3", name: "الأنبط", role: "توزيع ومبيعات", salary: 3500, date: "2025-03-10", status: "نشط", notes: "عهدة الباعة" }
     ];
   });
@@ -115,13 +114,15 @@ export default function Expenses() {
   const [toast, setToast] = useState("");
   function showToast(msg) { setToast(msg); setTimeout(() => setToast(""), 1800); }
 
-  // ===== Load Data =====
+  // ===== 🛠️ إصلاح دالة التحميل لتعمل وفقاً للفترة الزمنية المحددة الحالية دون زيادة =====
   async function loadRows() {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from("expenses")
         .select("*")
+        .gte("expense_date", from) // قيد البداية المحددة بالواجهة
+        .lte("expense_date", to)   // قيد النهاية المحددة بالواجهة
         .order("expense_date", { ascending: false })
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -133,7 +134,10 @@ export default function Expenses() {
     }
   }
 
-  useEffect(() => { loadRows(); }, [from, to]);
+  useEffect(() => { 
+    loadRows(); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
 
   // ===== Computed (TAB 1) =====
   const filtered = useMemo(() => {
@@ -160,7 +164,7 @@ export default function Expenses() {
     return { income, expense, net: income - expense, cashNet: incomeCash - expenseCash };
   }, [filtered]);
 
-  // ===== الحسابات التفاعلية المترابطة للرواتب والسلف برمجياً داخل React =====
+  // ===== المحرك المالي المحوسب للرواتب والسلف والتأمين المحاسبي =====
   const salaryRows = useMemo(() => {
     return (rows || [])
       .filter((r) => String(r.direction || "") === "expense")
@@ -321,6 +325,22 @@ export default function Expenses() {
     w.document.close();
   }
 
+  // 🔥 إصلاح المسمى المنهار وإعادة ربطه بـ التصدير الذكي للموظفين
+  function exportEmpStatementToCSV() {
+    if (!employeeStatementData.length) return alert("لا توجد بيانات متاحة للتصدير.");
+    let csvContent = "\uFEFF"; 
+    csvContent += "التاريخ,البيان المالي,مدين,دائن,الرصيد المتبقي\n";
+    employeeStatementData.forEach(r => {
+      csvContent += `${r.date},"${r.kind}",${r.debit},${r.credit},${r.runningBalance}\n`;
+    });
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `كشف_حساب_${empFilter}.csv`);
+    link.click();
+  }
+
   const salaryTotals = useMemo(() => {
     let salary = 0; let advance = 0;
     for (const r of salaryRows) {
@@ -332,7 +352,7 @@ export default function Expenses() {
 
   return (
     <div className="page" style={{ padding: 18, direction: "rtl" }}>
-      {toast && <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 12, background: "rgba(54, 208, 170, 0.9)", color: "#fff" }}>{toast}</div>}
+      {toast && <div style={{ position: "fixed", top: 16, right: 16, zIndex: 99999, padding: "12px 14px", borderRadius: 14, background: "rgba(54, 208, 170, 0.9)", color: "#fff" }}>{toast}</div>}
 
       <div className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
@@ -345,7 +365,7 @@ export default function Expenses() {
         </div>
       </div>
 
-      {/* ===================== TAB 1: المصروفات والدخل ===================== */}
+      {/* ===================== TAB 1: المصروفات والدخل المفلتر تاريخياً ===================== */}
       {tab === "expenses" && (
         <>
           <div className="card" style={{ padding: 16, marginBottom: 15 }}>
