@@ -15,6 +15,7 @@ import CashBoxReport from "./pages/CashBoxReport";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import Vendors from "./pages/Vendors";
+import Employees from "./pages/Employees";
 import Login from "./pages/Login";
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
         <Route path="vendors" element={<Vendors />} />
+        <Route path="employees" element={<Employees />} />
         <Route path="/vendors" element={<Vendors />} />
         <Route
   path="cashbox"
