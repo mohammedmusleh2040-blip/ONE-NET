@@ -8,6 +8,7 @@ function Icon({ name }) {
   const map = {
     home: "🏠",
     users: "👥",
+    employee: "👨‍💼",
     file: "🧾",
     card: "💳",
     cashflow: "💰",
@@ -117,6 +118,12 @@ export default function Layout() {
   { to: "/dashboard", label: "الرئيسية", icon: "home", show: !!perms.dashboard },
 
   { to: "/customers", label: "العملاء", icon: "users", show: !!perms.customers },
+    {
+  to: "/employees",
+  label: "الموظفون",
+  icon: "employee",
+  show: true,
+},
 
   { to: "/invoices", label: "الفواتير", icon: "file", show: !!perms.invoices },
 
