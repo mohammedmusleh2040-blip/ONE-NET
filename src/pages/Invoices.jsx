@@ -735,11 +735,17 @@ export default function Invoices() {
 
       const refundCash = safeNum(invRow?.paid_amount);
       if (refundCash > 0) {
-        await supabase.from("payments").insert([{
-          customer_id: invRow.customer_id, invoice_id: null, pay_date: todayISO(), amount: refundCash, payment_type: "other", method: "cash", reference: `REFUND-${refundNo}`,
-          note: `[REFUND_CASH_OUT] Refund ${refundNo} for ${invRow.number || invRow.id}`,
-          created_at: `${todayISO()}T12:00:00.000+03:00`,
-        }]);
+        await supabase.from("expenses").insert({
+  expense_date: todayISO(),
+  category: "مرتجع مبيعات",
+  amount: refundCash,
+  direction: "OUT",
+  method: "cash",
+  note: `مرتجع الفاتورة ${invRow.number}`,
+  employee_id: null,
+  expense_type: "refund",
+  expense_group: "sales_refund",
+});
       }
 
       await loadCardBalances();
