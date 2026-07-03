@@ -732,6 +732,10 @@ export default function Invoices() {
 
       const oldNote = String(invRow.note || "");
       await supabase.from("invoices").update({ note: oldNote ? `${oldNote}\n[REFUNDED->${refundNo}]` : `[REFUNDED->${refundNo}]` }).eq("id", invRow.id);
+      await supabase
+  .from("payments")
+  .delete()
+  .eq("invoice_id", invRow.id);
 
       const refundCash = safeNum(invRow?.paid_amount);
       if (refundCash > 0) {
