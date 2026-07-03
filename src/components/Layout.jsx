@@ -30,6 +30,7 @@ export default function Layout() {
 
   const [sessUser, setSessUser] = useState(() => currentUser());
   const [brand, setBrand] = useState({ name: "ONE NET ERP", logo: "" });
+  const [openMenus, setOpenMenus] = useState({});
 
   useEffect(() => {
     setSessUser(currentUser());
@@ -119,10 +120,31 @@ export default function Layout() {
 
   { to: "/customers", label: "العملاء", icon: "users", show: !!perms.customers },
     {
-  to: "/employees",
   label: "الموظفون",
   icon: "employee",
   show: true,
+  children: [
+    {
+      to: "/employees",
+      label: "إدارة الموظفين",
+    },
+    {
+      to: "/payroll",
+      label: "الرواتب",
+    },
+    {
+      to: "/salary-report",
+      label: "مسير الرواتب",
+    },
+    {
+      to: "/employee-advances",
+      label: "السلف",
+    },
+    {
+      to: "/employee-statement",
+      label: "كشف حساب الموظف",
+    },
+  ],
 },
 
   { to: "/invoices", label: "الفواتير", icon: "file", show: !!perms.invoices },
@@ -175,31 +197,132 @@ export default function Layout() {
         </div>
 
         <nav style={{ display: "grid", gap: 6 }}>
-          {items
-            .filter((x) => x.show)
-            .map((it) => {
-              const active = location.pathname.startsWith(it.to);
-              return (
-                <Link
-                  key={it.to}
-                  to={it.to}
-                  style={{
-                    textDecoration: "none",
-                    color: "#fff",
-                    padding: "10px 10px",
-                    borderRadius: 10,
-                    background: active ? "rgba(255,255,255,.12)" : "transparent",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <Icon name={it.icon} />
-                  <span>{it.label}</span>
-                </Link>
-              );
-            })}
-        </nav>
+
+  {items.filter(x => x.show).map((it) => {
+
+    if (it.children) {
+
+      const opened = openMenus[it.label];
+
+      return (
+
+        <div key={it.label}>
+
+          <div
+            onClick={() =>
+              setOpenMenus({
+                ...openMenus,
+                [it.label]: !opened,
+              })
+            }
+            style={{
+              cursor: "pointer",
+              padding: "10px",
+              borderRadius: 10,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "rgba(255,255,255,.05)",
+            }}
+          >
+
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+
+              <Icon name={it.icon}/>
+
+              {it.label}
+
+            </div>
+
+            <span>
+
+              {opened ? "▾" : "▸"}
+
+            </span>
+
+          </div>
+
+          {opened && (
+
+            <div
+              style={{
+                marginRight:20,
+                marginTop:5,
+                display:"grid",
+                gap:5,
+              }}
+            >
+
+              {it.children.map(child=>{
+
+                const active=location.pathname===child.to;
+
+                return(
+
+                  <Link
+                    key={child.to}
+                    to={child.to}
+                    style={{
+                      color:"#ddd",
+                      textDecoration:"none",
+                      padding:"8px 12px",
+                      borderRadius:8,
+                      background:active
+                        ? "rgba(255,255,255,.12)"
+                        : "transparent",
+                    }}
+                  >
+
+                    {child.label}
+
+                  </Link>
+
+                );
+
+              })}
+
+            </div>
+
+          )}
+
+        </div>
+
+      );
+
+    }
+
+    const active = location.pathname.startsWith(it.to);
+
+    return (
+
+      <Link
+        key={it.to}
+        to={it.to}
+        style={{
+          textDecoration:"none",
+          color:"#fff",
+          padding:"10px",
+          borderRadius:10,
+          background:active
+            ? "rgba(255,255,255,.12)"
+            : "transparent",
+          display:"flex",
+          alignItems:"center",
+          gap:8,
+        }}
+      >
+
+        <Icon name={it.icon}/>
+
+        {it.label}
+
+      </Link>
+
+    );
+
+  })}
+
+</nav>
 
         <button
           onClick={doLogout}
