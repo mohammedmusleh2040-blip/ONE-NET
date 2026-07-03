@@ -32,21 +32,29 @@ export default function DailyCashReport() {
 
     let invoiceMap = {};
 
-    if (invoiceIds.length > 0) {
-      const { data: invRows = [] } = await supabase
-        .from("invoices")
-        .select("id, number")
-        .in("id", invoiceIds);
+    const { data: invRows = [] } = await supabase
+  .from("invoices")
+  .select("id, number, is_refund")
+  .in("id", invoiceIds);
 
       invoiceMap = Object.fromEntries(
-        invRows.map((i) => [i.id, i.number])
-      );
+  invRows.map((i) => [
+    i.id,
+    {
+      number: i.number,
+      is_refund: i.is_refund,
+    },
+  ])
+);
     }
 
-    const finalPayments = payRows.map((p) => ({
-      ...p,
-      invoice_number: invoiceMap[p.invoice_id] || "-"
-    }));
+    const finalPayments = payRows
+  .map((p) => ({
+    ...p,
+    invoice_number: invoiceMap[p.invoice_id]?.number || "-",
+    is_refund: invoiceMap[p.invoice_id]?.is_refund || false,
+  }))
+  .filter((p) => !p.is_refund);
 
     const { data: expRows = [] } = await supabase
       .from("expenses")
