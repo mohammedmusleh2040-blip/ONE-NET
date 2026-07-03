@@ -25,7 +25,7 @@ async function syncInvoicePayments(invoiceId) {
   // احسب مجموع السداد على هذه الفاتورة
   const { data: inv, error: invErr } = await supabase
     .from("invoices")
-    .select("id,paid_amount,remaining_amount")
+    .select("id,total_after_discount")
     .eq("id", iid)
     .maybeSingle();
   if (invErr || !inv) return;
@@ -37,7 +37,7 @@ async function syncInvoicePayments(invoiceId) {
   if (payErr) return;
 
   const paid = Math.max(0, (pays || []).reduce((s, p) => s + safeNum(p.amount), 0));
-  const total = safeNum(inv.paid_amount) + safeNum(inv.remaining_amount);
+  const total = safeNum(inv.total_after_discount);
   const remaining = Math.max(0, total - paid);
   const status = remaining <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
 
@@ -350,7 +350,7 @@ async function savePayment(e) {
     if (iid) {
       const { data: inv, error: invErr } = await supabase
         .from("invoices")
-        .select("id,paid_amount,remaining_amount")
+        .select("id,total_after_discount")
         .eq("id", iid)
         .maybeSingle();
       if (invErr || !inv) throw new Error("لم يتم العثور على الفاتورة المختارة");
@@ -418,18 +418,27 @@ amount: amt,
 async function deletePayment(id) {
   const ok = confirm("حذف السند؟");
   if (!ok) return;
+
   try {
     setLoading(true);
 
     const row = (rows || []).find((r) => Number(r.id) === Number(id));
     const invId = Number(row?.invoice_id || 0) || null;
 
-    const { error } = await supabase.from("payments").delete().eq("id", id);
+    const { error } = await supabase
+      .from("payments")
+      .delete()
+      .eq("id", id);
+
     if (error) throw error;
 
-    if (invId) await syncInvoicePayments(invId);
+    if (invId) {
+      await syncInvoicePayments(invId);
+    }
 
     await loadPayments();
+    await loadInvoices();
+
   } catch (e) {
     console.error(e);
     alert(e?.message || "فشل حذف السند");
