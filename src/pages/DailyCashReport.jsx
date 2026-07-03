@@ -11,14 +11,20 @@ export default function DailyCashReport() {
   const [totalExpenses, setTotalExpenses] = useState(0);
 
   async function loadReport() {
-    const { data: payRows } = await supabase
+    // استخدمنا or لجلب السجلات التي ليست مرجعة (is_refund ليست true)
+    const { data: payRows, error: payError } = await supabase
       .from("payments")
       .select("id, amount, invoice_id, note, pay_date, method, is_refund")
       .gte("pay_date", fromDate)
       .lte("pay_date", toDate)
       .neq("method", "from_balance")
-      .neq("is_refund", true)
+      .or("is_refund.eq.false,is_refund.is.null") // هذا هو التعديل الأساسي
       .order("pay_date", { ascending: false });
+
+    if (payError) {
+      console.error("Payment Error Details:", payError);
+      return; // توقف في حال وجود خطأ
+    }
 
     const safePayRows = payRows || [];
 
