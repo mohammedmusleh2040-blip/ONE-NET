@@ -79,30 +79,78 @@ async function saveAdvance() {
     settled: form.settled,
   };
 
-  let error;
+  const emp = employees.find(
+    e => Number(e.id) === Number(form.employee_id)
+  );
 
   if (form.id) {
 
-    ({ error } = await supabase
+    const { error } = await supabase
       .from("employee_advances")
       .update(payload)
-      .eq("id", form.id));
+      .eq("id", form.id);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    if (form.expense_id) {
+
+      await supabase
+        .from("expenses")
+        .update({
+          expense_date: form.advance_date,
+          category: "سلفة موظف",
+          amount: Number(form.amount),
+          direction: "expense",
+          method: "cash",
+          note: `سلفة للموظف ${emp?.name || ""}`,
+        })
+        .eq("id", form.expense_id);
+
+    }
 
   } else {
 
-    ({ error } = await supabase
+    const { data: advance, error } = await supabase
       .from("employee_advances")
-      .insert(payload));
+      .insert(payload)
+      .select()
+      .single();
 
-  }
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
-  if (error) {
-    alert(error.message);
-    return;
+    const { data: exp, error: expError } = await supabase
+      .from("expenses")
+      .insert({
+        expense_date: form.advance_date,
+        category: "سلفة موظف",
+        amount: Number(form.amount),
+        direction: "expense",
+        method: "cash",
+        note: `سلفة للموظف ${emp?.name || ""}`,
+      })
+      .select()
+      .single();
+
+    if (!expError) {
+
+      await supabase
+        .from("employee_advances")
+        .update({
+          expense_id: exp.id,
+        })
+        .eq("id", advance.id);
+
+    }
+
   }
 
   setForm(emptyForm);
-
   loadAdvances();
 
 }
@@ -110,35 +158,42 @@ async function saveAdvance() {
 function editAdvance(row) {
 
   setForm({
-
-    id: row.id,
-
-    employee_id: row.employee_id,
-
-    amount: row.amount,
-
-    advance_date: row.advance_date,
-
-    notes: row.notes || "",
-
-    settled: row.settled,
-
-  });
+  id: row.id,
+  employee_id: row.employee_id,
+  amount: row.amount,
+  advance_date: row.advance_date,
+  notes: row.notes || "",
+  settled: row.settled,
+  expense_id: row.expense_id,
+});
 
 }
 
 async function deleteAdvance(id) {
+  if (!window.confirm("حذف السلفة؟")) return;
 
-  if (!window.confirm("حذف السلفة؟"))
-    return;
+  // جلب رقم المصروف المرتبط بالسلفة
+  const { data: advance } = await supabase
+    .from("employee_advances")
+    .select("expense_id")
+    .eq("id", id)
+    .single();
 
+  // حذف المصروف إذا كان موجوداً
+  if (advance?.expense_id) {
+    await supabase
+      .from("expenses")
+      .delete()
+      .eq("id", advance.expense_id);
+  }
+
+  // حذف السلفة
   await supabase
     .from("employee_advances")
     .delete()
     .eq("id", id);
 
   loadAdvances();
-
 }const totalAdvances = rows.reduce(
   (s, r) => s + Number(r.amount || 0),
   0
