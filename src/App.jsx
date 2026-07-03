@@ -17,6 +17,9 @@ import Settings from "./pages/Settings";
 import Vendors from "./pages/Vendors";
 import Employees from "./pages/Employees";
 import Payroll from "./pages/Payroll";
+import SalaryReport from "./pages/SalaryReport";
+import EmployeeAdvances from "./pages/EmployeeAdvances";
+import EmployeeStatement from "./pages/EmployeeStatement";
 import Login from "./pages/Login";
 
 export default function App() {
@@ -45,6 +48,9 @@ export default function App() {
         <Route path="vendors" element={<Vendors />} />
         <Route path="employees" element={<Employees />} />
         <Route path="payroll" element={<Payroll />} />
+        <Route path="salary-report" element={<SalaryReport />} />
+<Route path="employee-advances" element={<EmployeeAdvances />} />
+<Route path="employee-statement" element={<EmployeeStatement />} />
         <Route path="/vendors" element={<Vendors />} />
         <Route
   path="cashbox"
