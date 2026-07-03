@@ -11,20 +11,16 @@ export default function DailyCashReport() {
   const [totalExpenses, setTotalExpenses] = useState(0);
 
   async function loadReport() {
-    // استخدمنا or لجلب السجلات التي ليست مرجعة (is_refund ليست true)
+    // تم إزالة شرط is_refund لأنه غير موجود في قاعدة البيانات
     const { data: payRows, error: payError } = await supabase
       .from("payments")
-      .select("id, amount, invoice_id, note, pay_date, method, is_refund")
+      .select("id, amount, invoice_id, note, pay_date, method")
       .gte("pay_date", fromDate)
       .lte("pay_date", toDate)
       .neq("method", "from_balance")
-      .or("is_refund.eq.false,is_refund.is.null") // هذا هو التعديل الأساسي
       .order("pay_date", { ascending: false });
 
-    if (payError) {
-      console.error("Payment Error Details:", payError);
-      return; // توقف في حال وجود خطأ
-    }
+    if (payError) console.error("Payment Error:", payError);
 
     const safePayRows = payRows || [];
 
@@ -67,7 +63,9 @@ export default function DailyCashReport() {
       <style>{`
         @media print {
           .no-print { display: none !important; }
-          body { padding: 0 !important; }
+          body * { visibility: hidden; }
+          #report-content, #report-content * { visibility: visible; }
+          #report-content { position: absolute; left: 0; top: 0; width: 100%; }
         }
         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
         th, td { border: 1px solid #000; padding: 8px; text-align: center; }
@@ -81,55 +79,57 @@ export default function DailyCashReport() {
           <button onClick={() => window.print()}>طباعة</button>
         </div>
 
-        <h1>تقرير اليومية</h1>
-        <h3>من {fromDate} إلى {toDate}</h3>
+        <div id="report-content">
+          <h1>تقرير اليومية</h1>
+          <h3>من {fromDate} إلى {toDate}</h3>
 
-        <div style={{ background: "#e0f7fa", padding: "10px", borderRadius: "8px", marginBottom: "20px" }}>
-          <h2>إجمالي القبض: {totalPayments.toLocaleString()}</h2>
-        </div>
+          <div style={{ background: "#e0f7fa", padding: "10px", borderRadius: "8px", marginBottom: "20px" }}>
+            <h2>إجمالي القبض: {totalPayments.toLocaleString()}</h2>
+          </div>
 
-        <h2>سندات القبض</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th>
-              <th>الفاتورة</th>
-              <th>المبلغ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {payments.map((p) => (
-              <tr key={p.id}>
-                <td>{p.pay_date}</td>
-                <td>{p.invoice_number}</td>
-                <td>{Number(p.amount).toLocaleString()}</td>
+          <h2>سندات القبض</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>الفاتورة</th>
+                <th>المبلغ</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {payments.map((p) => (
+                <tr key={p.id}>
+                  <td>{p.pay_date}</td>
+                  <td>{p.invoice_number}</td>
+                  <td>{Number(p.amount).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-        <h2>المصروفات</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th>
-              <th>البند</th>
-              <th>المبلغ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {expenses.map((e) => (
-              <tr key={e.id}>
-                <td>{e.expense_date}</td>
-                <td>{e.category}</td>
-                <td>{Number(e.amount).toLocaleString()}</td>
+          <h2>المصروفات</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>البند</th>
+                <th>المبلغ</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        
-        <div style={{ marginTop: 20, fontWeight: "bold", fontSize: "1.2em", borderTop: "2px solid #000", paddingTop: "10px" }}>
-          الصافي (القبض - المصروفات): {(totalPayments - totalExpenses).toLocaleString()}
+            </thead>
+            <tbody>
+              {expenses.map((e) => (
+                <tr key={e.id}>
+                  <td>{e.expense_date}</td>
+                  <td>{e.category}</td>
+                  <td>{Number(e.amount).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          <div style={{ marginTop: 20, fontWeight: "bold", fontSize: "1.2em", borderTop: "2px solid #000", paddingTop: "10px" }}>
+            الصافي (القبض - المصروفات): {(totalPayments - totalExpenses).toLocaleString()}
+          </div>
         </div>
       </div>
     </>
