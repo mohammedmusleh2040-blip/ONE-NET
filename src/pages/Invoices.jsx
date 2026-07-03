@@ -1345,20 +1345,42 @@ export default function Invoices() {
           <div style={styles.subTitle}>سجل الفواتير العام</div>
           <div style={{ display: "flex", gap: "10px", marginBottom: "15px", flexWrap: "wrap", alignItems: "center" }}>
             {!isSeller && (
-              <select value={invScope} onChange={(e) => setInvScope(e.target.value)} style={styles.input} style={{ maxWidth: 180 }}>
+              <select
+  value={invScope}
+  onChange={(e) => setInvScope(e.target.value)}
+  style={{
+    ...styles.input,
+    maxWidth: 180,
+  }}
+>
                 <option value="all">📁 كل جهات الإصدار</option>
                 <option value="seller">فواتير البائع</option>
                 <option value="admin">فواتير الإدارة</option>
               </select>
             )}
-            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} style={styles.input} style={{ maxWidth: 180 }}>
+            <select
+value={paymentFilter}
+onChange={(e)=>setPaymentFilter(e.target.value)}
+style={{
+  ...styles.input,
+  maxWidth:180
+}}
+>
               <option value="all">🔍 كل حالات السداد</option>
               <option value="paid">مدفوعة بالكامل</option>
               <option value="partial">مدفوعة جزئياً</option>
               <option value="unpaid">غير مدفوعة (آجل قائم)</option>
               <option value="refund">مرتجعة ماليّاً</option>
             </select>
-            <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="بحث برقم الفاتورة، اسم العميل، البيان..." style={styles.input} style={{ maxWidth: 280 }} />
+            <input
+  value={invoiceSearch}
+  onChange={(e) => setInvoiceSearch(e.target.value)}
+  placeholder="بحث برقم الفاتورة، اسم العميل، البيان..."
+  style={{
+    ...styles.input,
+    maxWidth: 280,
+  }}
+/>
             <button onClick={clearFilters} style={styles.btnGhost}>❌ تفريغ فلاتر البحث</button>
             <button onClick={printFilteredInvoices} style={styles.btnPrimary}>🖨️ طباعة السجل المفلتر</button>
           </div>
@@ -1440,7 +1462,12 @@ export default function Invoices() {
             <h3>سداد فاتورة #{payInvoice?.number || payInvoice?.id}</h3>
             <div style={styles.payHint}>المتبقي القائم للفاتورة: <b>{money(payInvoice?.remaining_amount)} ريال</b></div>
             
-            <div style={styles.grid2}>
+            <div
+style={{
+  ...styles.grid2,
+  marginTop:10
+}}
+>
               <label style={styles.label}>تاريخ ووقت السداد المستهدف
                 <input type="datetime-local" value={payDate} onChange={(e) => setPayDate(e.target.value)} style={styles.input} />
               </label>
@@ -1448,7 +1475,12 @@ export default function Invoices() {
               <label style={styles.label}>مبلغ التحصيل المستلم<input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} style={styles.input} /></label>
             </div>
 
-            <div style={styles.grid2} style={{ marginTop: 10 }}>
+            <div
+style={{
+  ...styles.grid2,
+  marginTop:10
+}}
+>
               <label style={styles.label}>طريقة التحصيل
                 <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={styles.input}>
                   <option value="cash">نقدي (كاش الصندوق)</option>
@@ -1461,7 +1493,12 @@ export default function Invoices() {
               </label>
             </div>
 
-            <div style={styles.grid1} style={{ marginTop: 10 }}>
+            <div
+style={{
+  ...styles.grid1,
+  marginTop:10
+}}
+>
               <label style={styles.label}>ملاحظة السند
                 <input value={payNote} onChange={(e) => setPayNote(e.target.value)} style={styles.input} placeholder="ملاحظات اختيارية..." />
               </label>
