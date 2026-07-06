@@ -101,15 +101,20 @@ export default function Ledger() {
   const [isSeller, setIsSeller] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const u = data?.user || null;
-        setAuthUser(u);
-        setIsSeller(!!u);
-      } catch {}
-    })();
-  }, []);
+  (async () => {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const u = data?.user || null;
+      setAuthUser(u);
+      setIsSeller(!!u);
+    } catch {}
+  })();
+}, []);
+
+useEffect(() => {
+  loadCustomers();
+  loadCardTypes();
+}, []);
 
   // Shared Filters
   const [from, setFrom] = useState(todayISO());
