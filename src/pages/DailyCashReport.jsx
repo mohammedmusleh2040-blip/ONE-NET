@@ -54,18 +54,53 @@ export default function DailyCashReport() {
   .filter((p) => !p.is_refund);
 
     const { data: expRows } = await supabase
-      .from("expenses")
-      .select("*")
-      .gte("expense_date", fromDate)
-      .lte("expense_date", toDate)
-      .order("expense_date", { ascending: false });
+  .from("expenses")
+  .select("*")
+  .gte("expense_date", fromDate)
+  .lte("expense_date", toDate)
+  .order("expense_date", { ascending: false });
 
-    const safeExpRows = expRows || [];
+const safeExpRows = expRows || [];
 
-    setPayments(finalPayments);
-    setExpenses(safeExpRows);
-    setTotalPayments(finalPayments.reduce((sum, row) => sum + Number(row.amount || 0), 0));
-    setTotalExpenses(safeExpRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
+// دخل يدوي
+const manualIncome = safeExpRows.filter(
+  (r) => r.direction === "income"
+);
+
+// مصروفات فقط
+const onlyExpenses = safeExpRows.filter(
+  (r) => r.direction !== "income"
+);
+
+// أضف الدخل اليدوي إلى سندات القبض
+const allPayments = [
+  ...finalPayments,
+  ...manualIncome.map((r) => ({
+    id: `income-${r.id}`,
+    pay_date: r.expense_date,
+    invoice_number: "-",
+    amount: r.amount,
+    note: r.category,
+  })),
+];
+
+setPayments(allPayments);
+
+setExpenses(onlyExpenses);
+
+setTotalPayments(
+  allPayments.reduce(
+    (s, r) => s + Number(r.amount || 0),
+    0
+  )
+);
+
+setTotalExpenses(
+  onlyExpenses.reduce(
+    (s, r) => s + Number(r.amount || 0),
+    0
+  )
+);
   }
 
   useEffect(() => {
