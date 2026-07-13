@@ -5,6 +5,11 @@ export default function Payroll() {
 
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
+  const [paymentDate, setPaymentDate] = useState(
+  new Date().toISOString().split("T")[0]
+);
+
+const [paymentMethod, setPaymentMethod] = useState("cash");
 
   const [rows, setRows] = useState([]);
 
@@ -79,7 +84,7 @@ export default function Payroll() {
       deductions: emp.deductions,
       advances: emp.advances,
       net_salary: emp.net_salary,
-      payment_method: "cash"
+      payment_method: paymentMethod, paid_at: paymentDate
     });
 
   if (error) {
@@ -91,7 +96,7 @@ export default function Payroll() {
   await supabase
     .from("expenses")
     .insert({
-  expense_date: new Date().toISOString().split("T")[0],
+  expense_date: paymentDate,
   category: "راتب موظف",
   amount: emp.net_salary,
   direction: "expense",
@@ -151,6 +156,19 @@ export default function Payroll() {
           value={year}
           onChange={(e)=>setYear(Number(e.target.value))}
         />
+        
+        <input
+  type="date"
+  value={paymentDate}
+  onChange={(e) => setPaymentDate(e.target.value)}
+/>
+        <select
+  value={paymentMethod}
+  onChange={(e) => setPaymentMethod(e.target.value)}
+>
+  <option value="cash">نقد</option>
+  <option value="bank">تحويل بنكي</option>
+</select>
 
       </div>
 
