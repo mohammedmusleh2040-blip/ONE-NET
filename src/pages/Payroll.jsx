@@ -51,6 +51,87 @@ export default function Payroll() {
     setRows(result);
 
   }
+  async function paySalary(emp) {
+
+  // التحقق من عدم صرف الراتب سابقاً
+  const { data: paid } = await supabase
+    .from("salary_payments")
+    .select("id")
+    .eq("employee_id", emp.id)
+    .eq("year", year)
+    .eq("month", month)
+    .maybeSingle();
+
+  if (paid) {
+    alert("تم صرف راتب هذا الشهر مسبقاً");
+    return;
+  }
+
+  // حفظ سجل الراتب
+  const { error } = await supabase
+    .from("salary_payments")
+    .insert({
+      employee_id: emp.id,
+      year,
+      month,
+      basic_salary: emp.salary,
+      allowances: emp.allowances,
+      deductions: emp.deductions,
+      advances: emp.advances,
+      net_salary: emp.net_salary,
+      payment_method: "cash"
+    });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  // تسجيل مصروف الراتب
+  await supabase
+    .from("expenses")
+    .insert({
+  expense_date: new Date().toISOString().split("T")[0],
+  category: "راتب موظف",
+  amount: emp.net_salary,
+  direction: "expense",
+  method: "cash",
+  note: `راتب ${emp.name} - ${month}/${year}`,
+  employee_id: emp.id,
+  expense_type: "salary",
+  expense_group: "Payroll"
+});
+
+  // إذا توجد سلف
+  if (emp.advances > 0) {
+
+    // تسجيل دخل سداد السلفة
+    await supabase
+      .insert({
+  expense_date: new Date().toISOString().split("T")[0],
+  category: "سداد سلفة موظف",
+  amount: emp.advances,
+  direction: "income",
+  method: "cash",
+  note: `سداد سلفة ${emp.name}`,
+  employee_id: emp.id,
+  expense_type: "advance_settlement",
+  expense_group: "Payroll"
+});
+
+    // تحديث السلف إلى مسددة
+    await supabase
+      .from("employee_advances")
+      .update({ settled: true })
+      .eq("employee_id", emp.id)
+      .eq("settled", false);
+
+  }
+
+  alert("تم صرف الراتب بنجاح");
+
+  loadPayroll();
+}
 
   return (
     <div style={{padding:20}}>
@@ -120,11 +201,11 @@ export default function Payroll() {
 
               <td>
 
-                <button>
-
-                  صرف الراتب
-
-                </button>
+                <button
+  onClick={() => paySalary(emp)}
+>
+  صرف الراتب
+</button>
 
               </td>
 
