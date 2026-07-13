@@ -41,19 +41,34 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
           (s, a) => s + Number(a.amount),
           0
         );
+      const { data: payment } = await supabase
+  .from("salary_payments")
+  .select("amount_paid")
+  .eq("employee_id", emp.id)
+  .eq("year", year)
+  .eq("month", month)
+  .maybeSingle();
+
+const amountPaid = payment?.amount_paid || 0;
 
       result.push({
         ...emp,
-        allowances: 0,
-        deductions: 0,
-        advances: totalAdvance,
-        net_salary:
-          Number(emp.salary)
-          - totalAdvance,
+allowances: 0,
+deductions: 0,
+advances: totalAdvance,
+
+net_salary:
+  Number(emp.salary) - totalAdvance,
+
+amount_paid: amountPaid,
+
+remaining:
+  (Number(emp.salary) - totalAdvance) - amountPaid,
       });
 
     }
 
+    console.log(result);
     setRows(result);
 
   }
@@ -215,6 +230,12 @@ const amountToPay =
 
             <th>الصافي</th>
 
+            <th>المدفوع</th>
+
+<th>المتبقي</th>
+
+<th>الحالة</th>
+
             <th>الإجراء</th>
 
           </tr>
@@ -238,7 +259,19 @@ const amountToPay =
 
               <td>{emp.net_salary}</td>
 
-              <td>
+              <td>{emp.amount_paid ?? 0}</td>
+
+<td>{(emp.net_salary || 0) - (emp.amount_paid || 0)}</td>
+
+<td>
+  {(emp.amount_paid || 0) === 0
+    ? "🔴 لم يصرف"
+    : (emp.amount_paid || 0) >= (emp.net_salary || 0)
+    ? "🟢 مكتمل"
+    : "🟡 جزئي"}
+</td>
+
+<td>
 
                 <button
   onClick={() => paySalary(emp)}
