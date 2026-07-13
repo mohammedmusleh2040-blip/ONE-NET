@@ -8,6 +8,7 @@ export default function Payroll() {
   const [paymentDate, setPaymentDate] = useState(
   new Date().toISOString().split("T")[0]
 );
+  const [paymentAmount, setPaymentAmount] = useState(0);
 
 const [paymentMethod, setPaymentMethod] = useState("cash");
 
@@ -57,23 +58,36 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
 
   }
   async function paySalary(emp) {
+    if (paymentAmount > emp.net_salary) {
+  alert("المبلغ أكبر من صافي الراتب");
+  return;
+}
 
   // التحقق من عدم صرف الراتب سابقاً
   const { data: paid } = await supabase
     .from("salary_payments")
-    .select("id")
+    .select("id, amount_paid, net_salary")
     .eq("employee_id", emp.id)
     .eq("year", year)
     .eq("month", month)
     .maybeSingle();
 
-  if (paid) {
-    alert("تم صرف راتب هذا الشهر مسبقاً");
+  if (paid && paid.amount_paid >= paid.net_salary) {
+    alert("تم صرف الراتب بالكامل");
     return;
-  }
+}
 
+    let paidAmount = paid ? paid.amount_paid : 0;
+let remaining = emp.net_salary - paidAmount;
+
+const amountToPay =
+  paymentAmount > 0 ? paymentAmount : remaining;
+    if (amountToPay > remaining) {
+  alert("المبلغ أكبر من الرصيد المتبقي للراتب");
+  return;
+}
   // حفظ سجل الراتب
-  const { error } = await supabase
+    const { error } = await supabase
     .from("salary_payments")
     .insert({
       employee_id: emp.id,
@@ -84,6 +98,7 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
       deductions: emp.deductions,
       advances: emp.advances,
       net_salary: emp.net_salary,
+      amount_paid: paidAmount + amountToPay,
       payment_method: paymentMethod, paid_at: paymentDate
     });
 
@@ -98,7 +113,7 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
     .insert({
   expense_date: paymentDate,
   category: "راتب موظف",
-  amount: emp.net_salary,
+  amount: amountToPay,
   direction: "expense",
   method: paymentMethod,
   note: `راتب ${emp.name} - ${month}/${year}`,
@@ -169,6 +184,12 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
   <option value="cash">نقد</option>
   <option value="bank">تحويل بنكي</option>
 </select>
+        <input
+  type="number"
+  value={paymentAmount}
+  onChange={(e) => setPaymentAmount(Number(e.target.value))}
+  placeholder="مبلغ الصرف"
+/>
 
       </div>
 
