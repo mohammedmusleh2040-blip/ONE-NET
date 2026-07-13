@@ -100,7 +100,7 @@ const [paymentMethod, setPaymentMethod] = useState("cash");
   category: "راتب موظف",
   amount: emp.net_salary,
   direction: "expense",
-  method: "cash",
+  method: paymentMethod,
   note: `راتب ${emp.name} - ${month}/${year}`,
   employee_id: emp.id,
   expense_type: "salary",
