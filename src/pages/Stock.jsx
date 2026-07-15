@@ -95,25 +95,33 @@ export default function Stock() {
   const [editDate, setEditDate] = useState(dtLocalNow());
   const [editNote, setEditNote] = useState("");
 
-  const fmtDate = (iso) => {
-    if (!iso) return "-";
-    try { return new Date(iso).toLocaleString("ar-SA"); }
-    catch { return iso; }
-  };
+  const fmtDate = (value) => {
+  if (!value) return "-";
 
-  const rowBg = (noteText) => {
-    const t = noteText || "";
-    if (t.includes("حذف")) return "#dd1616ff";
-    if (t.includes("تصحيح")) return "#152bbaff";
-    return "transparent";
-  };
+  try {
+    const s = String(value);
 
-  const opType = (noteText) => {
-    const t = noteText || "";
-    if (t.includes("حذف")) return "حذف";
-    if (t.includes("تصحيح")) return "تصحيح";
-    return "عادية";
-  };
+    // إذا كان تاريخ فقط مثل 2026-07-15
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, m, d] = s.split("-");
+      return `${d}/${m}/${y}`;
+    }
+
+    const dt = new Date(s);
+
+    return dt.toLocaleString("ar-SA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+
+  } catch {
+    return value;
+  }
+};
 
   
 
@@ -479,6 +487,83 @@ async function applyMovement() {
       </span>
     </button>
   );
+        function printMovements() {
+  const rows = filteredMovements
+    .map((m, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${m.card_name || m.name || ""}</td>
+        <td>${m.movement_type}</td>
+        <td>${m.qty}</td>
+        <td>${m.before_balance ?? ""}</td>
+        <td>${m.after_balance ?? ""}</td>
+        <td>${m.note || ""}</td>
+        <td>${fmtDate(
+          m.movement_date ||
+          m.date ||
+          m.invoice_datetime ||
+          m.created_at
+        )}</td>
+      </tr>
+    `)
+    .join("");
+
+  const w = window.open("", "_blank");
+
+  w.document.write(`
+    <html dir="rtl">
+    <head>
+      <title>سجل حركة الكروت</title>
+      <style>
+        body{
+          font-family:Tahoma;
+          padding:20px;
+        }
+        table{
+          width:100%;
+          border-collapse:collapse;
+        }
+        th,td{
+          border:1px solid #000;
+          padding:6px;
+          text-align:center;
+        }
+        h2{
+          text-align:center;
+        }
+      </style>
+    </head>
+
+    <body>
+
+      <h2>سجل حركة الكروت</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>الكرت</th>
+            <th>الحركة</th>
+            <th>الكمية</th>
+            <th>قبل</th>
+            <th>بعد</th>
+            <th>الملاحظات</th>
+            <th>التاريخ</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+
+    </body>
+    </html>
+  `);
+
+  w.document.close();
+  w.print();
+}
 
   return (
     <div style={{ padding: "10px 6px" }}>
@@ -516,6 +601,19 @@ async function applyMovement() {
                 sub="IN / OUT + السجل"
                 onClick={() => setTab("movement")}
               />
+                    <button
+  className="btn btn-primary"
+  type="button"
+  onClick={printMovements}
+  style={{
+    minWidth: 180,
+    minHeight: 60,
+    borderRadius: 18,
+    fontWeight: 700,
+  }}
+>
+  🖨️ طباعة السجل
+</button>
             </div>
 
             <button className="btn" onClick={loadData} disabled={loading} type="button">
@@ -792,7 +890,7 @@ async function applyMovement() {
       <td>{safeNum(m.before_balance ?? m.before_qty ?? m.before ?? m.balance_before ?? 0)}</td>
       <td>{safeNum(m.after_balance ?? m.after_qty ?? m.after ?? m.balance_after ?? 0)}</td>
       <td style={{ color: "#334155" }}>{m.note || m.notes || ""}</td>
-      <td>{fmtDate(m.invoice_datetime || m.created_at || m.date || m.movement_date || "")}</td>
+      <td>{fmtDate(m.movement_date || m.date || m.invoice_datetime || m.created_at || "")}</td>
       <td>{m.op_type || m.operation_type || m.type || "عادية"}</td>
       <td style={{ textAlign: "center" }}>
         {/* Use the existing handlers implemented above */}
