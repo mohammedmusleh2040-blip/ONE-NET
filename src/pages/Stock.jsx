@@ -122,6 +122,19 @@ export default function Stock() {
     return value;
   }
 };
+  const rowBg = (note) => {
+  const t = String(note || "");
+
+  if (t.includes("حذف")) {
+    return "#ffe5e5";
+  }
+
+  if (t.includes("تصحيح")) {
+    return "#e6f4ff";
+  }
+
+  return "transparent";
+};
 
   
 
@@ -564,6 +577,160 @@ async function applyMovement() {
   w.document.close();
   w.print();
 }
+  function printBalance() {
+
+  const rows = filteredBalances
+    .map((b, i) => {
+
+      const th = Number(
+        b.low_stock_threshold ??
+        b.alert_qty ??
+        lowStockThreshold ??
+        0
+      );
+
+      const qty = Number(b.quantity || 0);
+
+      const bg =
+        qty === 0
+          ? "#ffecec"
+          : qty <= th
+          ? "#fff7e6"
+          : "white";
+
+      return `
+      <tr style="background:${bg}">
+        <td>${i + 1}</td>
+        <td>${b.card_name || b.name || ""}</td>
+        <td>${b.price ?? ""}</td>
+        <td>${qty}</td>
+        <td>${th}</td>
+      </tr>
+      `;
+    })
+    .join("");
+
+  const w = window.open("", "_blank");
+
+  w.document.write(`
+  <html dir="rtl">
+  <head>
+  <title>رصيد الكروت</title>
+
+  <style>
+
+  body{
+      font-family:Tahoma;
+      padding:20px;
+  }
+
+  h2{
+      text-align:center;
+  }
+
+  table{
+      width:100%;
+      border-collapse:collapse;
+  }
+
+  th,td{
+      border:1px solid #000;
+      padding:7px;
+      text-align:center;
+  }
+
+  th{
+      background:#eee;
+  }
+
+  </style>
+
+  </head>
+
+  <body>
+
+  <h2>رصيد الكروت</h2>
+
+  <table>
+
+  <thead>
+
+  <tr>
+      <th>#</th>
+      <th>الكرت</th>
+      <th>السعر</th>
+      <th>الرصيد</th>
+      <th>حد التنبيه</th>
+  </tr>
+
+  </thead>
+
+  <tbody>
+
+  ${rows}
+
+  </tbody>
+
+  </table>
+
+  </body>
+  </html>
+  `);
+
+  w.document.close();
+  w.print();
+
+}
+  function printNewType() {
+  const rows = filteredTypes
+    .map((m, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${m.name || ""}</td>
+        <td>${m.price ?? ""}</td>
+      </tr>
+    `)
+    .join("");
+
+  const w = window.open("", "_blank");
+
+  w.document.write(`
+    <html dir="rtl">
+    <head>
+      <title>أنواع الكروت</title>
+      <style>
+        body{font-family:Tahoma;padding:20px;}
+        table{width:100%;border-collapse:collapse;}
+        th,td{border:1px solid #000;padding:6px;text-align:center;}
+        h2{text-align:center;}
+      </style>
+    </head>
+
+    <body>
+
+      <h2>أنواع الكروت</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>اسم الكرت</th>
+            <th>السعر</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+
+    </body>
+    </html>
+  `);
+
+  w.document.close();
+  w.print();
+}
 
   return (
     <div style={{ padding: "10px 6px" }}>
@@ -604,7 +771,7 @@ async function applyMovement() {
                     <button
   className="btn btn-primary"
   type="button"
-  onClick={printMovements}
+  onClick={() => {   if (tab === "balance") {     printBalance();   } else if (tab === "movement") {     printMovements();   } else if (tab === "newType") {     printCardTypes();   } }}
   style={{
     minWidth: 180,
     minHeight: 60,
