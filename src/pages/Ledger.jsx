@@ -472,11 +472,11 @@ useEffect(() => {
 
       const { data: pays, error: payErr } = await supabase
         .from("payments")
-        .select("id,amount,method,payment_type,reference,note,created_at,invoice_id")
+        .select("id,amount,method,payment_type,reference,note,created_at,pay_date,invoice_id")
         .eq("customer_id", cid)
-        .gte("created_at", fromTs)
-        .lt("created_at", toTs)
-        .order("created_at", { ascending: true });
+        .gte("pay_date", from)
+.lt("pay_date", to)
+.order("pay_date", { ascending: true })
 
       if (payErr) throw payErr;
 
@@ -496,7 +496,7 @@ useEffect(() => {
       const payRows = safePays.map((p) => {
         const amt = safeNum(p.amount);
         return {
-          created_at: p.created_at,
+         created_at: p.pay_date   ? `${p.pay_date}T12:00:00`   : p.created_at,
           kind: amt >= 0 ? "سداد" : "مرتجع",
           ref: p.reference || (p.invoice_id ? `فاتورة#${p.invoice_id}` : `PAY-${p.id}`),
           debit: amt < 0 ? Math.abs(amt) : 0,
