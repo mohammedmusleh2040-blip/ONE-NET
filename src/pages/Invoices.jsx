@@ -1015,6 +1015,8 @@ export default function Invoices() {
     if (!payInvoice?.id) return;
     let amt = Math.max(0, safeNum(payAmount));
     if (amt <= 0) return showToast("أدخل مبلغ سداد صحيح", "warn");
+    if (loading) return;
+
 
     try {
       setLoading(true);
@@ -1027,6 +1029,12 @@ export default function Invoices() {
 
       const paidNew = safeNum(invRow.paid_amount) + amt;
       const remainingNew = Math.max(0, safeNum(invRow.total_after_discount) - paidNew);
+      const autoNote =
+  payNote?.trim()
+    ? payNote.trim()
+    : remainingNew > 0
+      ? `سداد جزئي للفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال، والمتبقي بعد السداد ${remainingNew.toFixed(2)} ريال`
+      : `سداد نهائي وإغلاق الفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال`;
 
       if (payMethod !== "from_balance") {
         const { error: pErr } = await supabase.from("payments").insert({
@@ -1037,14 +1045,16 @@ export default function Invoices() {
           payment_type: "invoice", 
           method: payMethod, 
           reference: payRef || null, 
-          note: payNote || null,
+          note: autoNote,
           created_at: `${payDate.slice(0, 10)}T${payDate.slice(11, 16)}:00.000+03:00`, 
           seller_user_id: user?.id || null,
         });
         if (pErr) throw pErr;
       }
 
-      await supabase.from("invoices").update({ paid_amount: paidNew, remaining_amount: remainingNew, status: asPaidStatus(remainingNew) }).eq("id", invId);
+      // لا يتم تحديث الفاتورة من React.
+// سيتم تحديث paid_amount و remaining_amount و status
+// تلقائياً من جدول payments بواسطة sync_invoice_financials().
       await loadInvoices();
       setPayModalOpen(false);
       showToast("تم السداد بنجاح", "ok");
