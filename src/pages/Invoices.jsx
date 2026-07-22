@@ -1041,7 +1041,7 @@ export default function Invoices() {
     .update({
       paid_amount: paidNew,
 remaining_amount: remainingNew,
-status: remainingNew <= 0 ? "paid" : "partial",
+status: remainingNew <= 0 ? "paid" : "unpaid",
       note: autoNote,
     })
     .eq("id", invId);
