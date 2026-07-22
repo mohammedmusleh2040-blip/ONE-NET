@@ -18,12 +18,12 @@ export default function DailyCashReport() {
   .gte("pay_date", fromDate)
   .lte("pay_date", toDate)
   .neq("method", "from_balance")
-  const safePayRows = payRows || [];
+  
   .order("pay_date", { ascending: false });
 
     if (payError) console.error("Payment Error:", payError);
 
-    const safePayRows = payRows || [];
+    const safePayRows = (payRows || []).filter(   (p) => !(p.note || "").includes("[WRITEOFF]") );
 
     const invoiceIds = [...new Set(safePayRows.map((p) => p.invoice_id).filter(Boolean))];
     let invoiceMap = {};
