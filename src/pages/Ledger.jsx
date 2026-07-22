@@ -485,7 +485,7 @@ useEffect(() => {
         created_at: x.created_at || `${x.invoice_date}T12:00:00`,
         kind: "فاتورة",
         ref: x.number || `INV-${String(x.id).padStart(6, "0")}`,
-        debit: safeNum(x.total_after_discount),
+        debit: safeNum(x.remaining_amount),
         credit: 0,
         note: x.note || "",
         invoice_id: x.id,
