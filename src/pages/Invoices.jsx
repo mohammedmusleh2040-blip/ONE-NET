@@ -1045,7 +1045,7 @@ export default function Invoices() {
       pay_date: payDate.slice(0, 10),
       amount: amt,
       payment_type: "write_off",
-      method: "write_off",
+      method: "cash",
       reference: null,
       note: autoNote,
       created_at: `${payDate.slice(0,10)}T${payDate.slice(11,16)}:00.000+03:00`,
