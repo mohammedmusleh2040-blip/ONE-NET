@@ -1039,9 +1039,9 @@ export default function Invoices() {
   const { error: invErr } = await supabase
     .from("invoices")
     .update({
-      paid_amount: safeNum(invRow.total_after_discount),
-      remaining_amount: 0,
-      status: "paid",
+      paid_amount: paidNew,
+remaining_amount: remainingNew,
+status: remainingNew <= 0 ? "paid" : "partial",
       note: autoNote,
     })
     .eq("id", invId);
