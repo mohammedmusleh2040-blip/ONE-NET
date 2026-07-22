@@ -18,7 +18,7 @@ export default function DailyCashReport() {
   .gte("pay_date", fromDate)
   .lte("pay_date", toDate)
   .neq("method", "from_balance")
-  .not("note", "ilike", "%[WRITEOFF]%")
+  const safePayRows = payRows || [];
   .order("pay_date", { ascending: false });
 
     if (payError) console.error("Payment Error:", payError);
