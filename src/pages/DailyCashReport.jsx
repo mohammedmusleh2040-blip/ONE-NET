@@ -13,12 +13,13 @@ export default function DailyCashReport() {
   async function loadReport() {
     // تم إزالة شرط is_refund لأنه غير موجود في قاعدة البيانات
     const { data: payRows, error: payError } = await supabase
-      .from("payments")
-      .select("id, amount, invoice_id, note, pay_date, method")
-      .gte("pay_date", fromDate)
-      .lte("pay_date", toDate)
-      .neq("method", "from_balance")
-      .order("pay_date", { ascending: false });
+  .from("payments")
+  .select("id, amount, invoice_id, note, pay_date, method")
+  .gte("pay_date", fromDate)
+  .lte("pay_date", toDate)
+  .neq("method", "from_balance")
+  .not("note", "ilike", "%[WRITEOFF]%")
+  .order("pay_date", { ascending: false });
 
     if (payError) console.error("Payment Error:", payError);
 
