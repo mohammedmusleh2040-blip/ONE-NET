@@ -1036,21 +1036,27 @@ export default function Invoices() {
       ? `سداد جزئي للفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال، والمتبقي بعد السداد ${remainingNew.toFixed(2)} ريال`
       : `سداد نهائي وإغلاق الفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال`;
       if (payMethod === "write_off") {
-  const { error: invErr } = await supabase
-    .from("invoices")
-    .update({
-      paid_amount: paidNew,
-remaining_amount: remainingNew,
-status: remainingNew <= 0 ? "paid" : "unpaid",
-      note: autoNote,
-    })
-    .eq("id", invId);
 
-  if (invErr) throw invErr;
+  const { error: pErr } = await supabase
+    .from("payments")
+    .insert({
+      customer_id: invRow.customer_id,
+      invoice_id: invId,
+      pay_date: payDate.slice(0, 10),
+      amount: amt,
+      payment_type: "write_off",
+      method: "write_off",
+      reference: null,
+      note: autoNote,
+      created_at: `${payDate.slice(0,10)}T${payDate.slice(11,16)}:00.000+03:00`,
+      seller_user_id: user?.id || null,
+    });
+
+  if (pErr) throw pErr;
 
   await loadInvoices();
   setPayModalOpen(false);
-  showToast("تمت مسامحة العميل وإغلاق الفاتورة", "ok");
+  showToast("تمت المسامحة بنجاح", "ok");
   return;
 }
 
