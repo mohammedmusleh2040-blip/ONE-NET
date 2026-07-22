@@ -185,14 +185,15 @@ export default function Customers() {
       // invoices
       const { data: invs, error: eI } = await supabase
         .from("invoices")
-        .select("id,customer_id,total_amount,total,grand_total,net_total,amount");
+        .select("id,customer_id,remaining_amount");
       if (eI) throw eI;
 
       (invs || []).forEach((inv) => {
-        const cid = inv.customer_id;
-        if (!custMap.has(cid)) return;
-        custMap.get(cid).invoices_total += pickInvoiceTotal(inv);
-      });
+  const cid = inv.customer_id;
+  if (!custMap.has(cid)) return;
+
+  custMap.get(cid).invoices_total += safeNum(inv.remaining_amount);
+});
 
       // payments
       const { data: pays, error: eP } = await supabase
