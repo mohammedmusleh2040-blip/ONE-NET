@@ -536,7 +536,7 @@ useEffect(() => {
 
       const { data: invoices } = await supabase
         .from("invoices")
-        .select("customer_id,total_after_discount,invoice_datetime,status")
+        .select("customer_id,remaining_amount,invoice_datetime,status")
         .not("status", "eq", "مرتجع");
 
       const { data: payments } = await supabase
@@ -548,7 +548,7 @@ useEffect(() => {
         const cPayments = (payments || []).filter((p) => p.customer_id === c.id);
 
         const opening = Number(c.opening_balance || 0);
-        const invTotal = cInvoices.reduce((a, b) => a + Number(b.total_after_discount || 0), 0);
+        const invTotal = cInvoices.reduce((a, b) => a + Number(b.remaining_amount || 0), 0);
         const payTotal = cPayments.reduce((a, b) => a + Number(b.amount || 0), 0);
         const balance = opening + invTotal - payTotal;
 
