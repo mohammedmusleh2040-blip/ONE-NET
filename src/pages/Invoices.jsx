@@ -1035,8 +1035,26 @@ export default function Invoices() {
     : remainingNew > 0
       ? `سداد جزئي للفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال، والمتبقي بعد السداد ${remainingNew.toFixed(2)} ريال`
       : `سداد نهائي وإغلاق الفاتورة ${invRow.number} بمبلغ ${amt.toFixed(2)} ريال`;
+      if (payMethod === "write_off") {
+  const { error: invErr } = await supabase
+    .from("invoices")
+    .update({
+      paid_amount: safeNum(invRow.total_after_discount),
+      remaining_amount: 0,
+      status: "paid",
+      note: autoNote,
+    })
+    .eq("id", invId);
 
-      if (payMethod !== "from_balance") {
+  if (invErr) throw invErr;
+
+  await loadInvoices();
+  setPayModalOpen(false);
+  showToast("تمت مسامحة العميل وإغلاق الفاتورة", "ok");
+  return;
+}
+
+      if (payMethod !== "from_balance" && payMethod !== "write_off") {
         const { error: pErr } = await supabase.from("payments").insert({
           customer_id: invRow.customer_id, 
           invoice_id: invId, 
@@ -1506,6 +1524,7 @@ style={{
                   <option value="cash">نقدي (كاش الصندوق)</option>
                   <option value="transfer">تحويل بنكي الكتروني</option>
                   <option value="from_balance">خصم من رصيد العميل المسبق</option>
+                  <option value="write_off">🎁 مسامحة العميل (إغلاق بدون سند)</option>
                 </select>
               </label>
               <label style={styles.label}>مرجع / رقم العملية (اختياري)
