@@ -16,11 +16,12 @@ export default function CashBoxReport() {
 
   async function loadReport() {
     const { data: payRows = [] } = await supabase
-      .from("payments")
-      .select("*")
-      .neq("method", "from_balance")
-      .gte("pay_date", fromDate)
-      .lte("pay_date", toDate);
+  .from("payments")
+  .select("*")
+  .neq("method", "from_balance")
+  .not("note", "ilike", "%[WRITEOFF]%")
+  .gte("pay_date", fromDate)
+  .lte("pay_date", toDate);
 
     const { data: expRows = [] } = await supabase
       .from("expenses")
