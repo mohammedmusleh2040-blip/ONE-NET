@@ -22,29 +22,14 @@ async function syncInvoicePayments(invoiceId) {
   const iid = Number(invoiceId || 0);
   if (!iid) return;
 
-  // احسب مجموع السداد على هذه الفاتورة
-  const { data: inv, error: invErr } = await supabase
-    .from("invoices")
-    .select("id,total_after_discount")
-    .eq("id", iid)
-    .maybeSingle();
-  if (invErr || !inv) return;
+  const { error } = await supabase.rpc("sync_invoice", {
+    p_invoice_id: iid,
+  });
 
-  const { data: pays, error: payErr } = await supabase
-    .from("payments")
-    .select("amount")
-    .eq("invoice_id", iid);
-  if (payErr) return;
-
-  const paid = Math.max(0, (pays || []).reduce((s, p) => s + safeNum(p.amount), 0));
-  const total = safeNum(inv.total_after_discount);
-  const remaining = Math.max(0, total - paid);
-  const status = remaining <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
-
-  await supabase
-    .from("invoices")
-    .update({ paid_amount: paid, remaining_amount: remaining, status })
-    .eq("id", iid);
+  if (error) {
+    console.error("sync_invoice failed:", error);
+    throw error;
+  }
 }
 
 export default function Payments() {
