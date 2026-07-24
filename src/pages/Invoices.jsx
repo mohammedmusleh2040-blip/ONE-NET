@@ -1003,7 +1003,16 @@ export default function Invoices() {
       const linesData = await fetchInvoiceLines(inv.id);
       const custName = inv.customer_name || customers.find((c) => c.id === inv.customer_id)?.name || "";
       const opening = safeNum(customers.find((c) => c.id === inv.customer_id)?.opening_balance ?? 0);
-      const invoicesRemaining = (invoices || []).filter((i) => Number(i.customer_id) === Number(inv.customer_id)).reduce((s, i) => s + safeNum(i.remaining_amount), 0);
+      const invoicesRemaining = (invoices || [])
+  .filter((i) => {
+    if (Number(i.customer_id) !== Number(inv.customer_id)) return false;
+
+    const note = String(i.note || "");
+    if (note.includes("[REFUNDED->")) return false;
+
+    return true;
+  })
+  .reduce((s, i) => s + safeNum(i.remaining_amount), 0);
       const unlinked = safeNum(unlinkedPaymentsByCustomer?.[String(inv.customer_id)] || 0);
       const debtVal = calcCustomerDebt(opening, invoicesRemaining, unlinked);
 
