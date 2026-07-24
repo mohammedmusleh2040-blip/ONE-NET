@@ -210,8 +210,18 @@ export default function Invoices() {
     const cid = Number(selectedCustomer.id);
     const opening = safeNum(selectedCustomer.opening_balance);
     const invoicesRemaining = (invoices || [])
-      .filter((i) => Number(i.customer_id) === cid)
-      .reduce((s, i) => s + safeNum(i.remaining_amount), 0);
+  .filter((i) => {
+    if (Number(i.customer_id) !== cid) return false;
+
+    const note = String(i.note || "");
+
+    // تجاهل الفاتورة الأصلية التي تم إنشاء مرتجع لها
+    if (note.includes("[REFUNDED->")) return false;
+
+    return true;
+  })
+  .reduce((s, i) => s + safeNum(i.remaining_amount), 0);
+    
     const unlinked = safeNum(unlinkedPaymentsByCustomer?.[String(cid)] || 0);
     return calcCustomerDebt(opening, invoicesRemaining, unlinked);
   }, [selectedCustomer, invoices, unlinkedPaymentsByCustomer]);
