@@ -37,17 +37,17 @@ export default function CashBoxReport() {
       0
     );
 
-    const bankRows = expRows.filter(
-      (e) =>
-        e.category === "ايداع للبنك" ||
-        e.category === "ايداع في البنك"
-    );
+    const BANK_CATEGORY = "ايداع البنك";
 
-    const normalRows = expRows.filter(
-      (e) =>
-        e.category !== "ايداع للبنك" &&
-        e.category !== "ايداع في البنك"
-    );
+const bankRows = expRows.filter(
+  (e) => e.category === BANK_CATEGORY
+);
+
+const normalRows = expRows.filter(
+  (e) => e.category !== BANK_CATEGORY
+);
+
+    
 
     const totalBank = bankRows.reduce(
       (sum, r) => sum + Number(r.amount || 0),
