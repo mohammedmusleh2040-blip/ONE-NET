@@ -15,13 +15,21 @@ export default function CashBoxReport() {
   const [bankDeposits, setBankDeposits] = useState(0);
 
   async function loadReport() {
-    const { data: payRows = [] } = await supabase
+    const {
+  data: payRows = [],
+  count,
+  error,
+} = await supabase
   .from("payments")
-  .select("*")
+  .select("*", { count: "exact" })
   .neq("method", "from_balance")
   .not("note", "ilike", "%[WRITEOFF]%")
   .gte("pay_date", fromDate)
   .lte("pay_date", toDate);
+
+console.log("Returned rows =", payRows.length);
+console.log("Count =", count);
+console.log("Error =", error);
 
     const { data: expRows = [] } = await supabase
       .from("expenses")
