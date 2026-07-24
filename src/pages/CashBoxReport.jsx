@@ -24,9 +24,12 @@ export default function CashBoxReport() {
       
   .select("*", { count: "exact" })
   .neq("method", "from_balance")
-  .not("note", "ilike", "%[WRITEOFF]%")
+  
   .gte("pay_date", fromDate)
   .lte("pay_date", toDate);
+    const safePayRows = (payRows || []).filter(
+  (p) => !(p.note || "").includes("[WRITEOFF]")
+);
     
 console.log(payRows);
 console.log(payRows);
@@ -47,7 +50,7 @@ console.log("Error =", error);
 );
 
 setPayments([
-  ...payRows,
+  ...safePayRows,
   ...manualIncome.map((r) => ({
     id: `income-${r.id}`,
     pay_date: r.expense_date,
@@ -58,11 +61,11 @@ setPayments([
 ]);
     setExpenses(expRows);
     
-    const totalPay = payRows.reduce(
+    const totalPay = safePayRows.reduce(
       (sum, r) => sum + Number(r.amount || 0),
       0
     );
-    console.log("payRows count =", payRows.length);
+    console.log("payRows count =", safePayRows.length);
 console.log("totalPay =", totalPay);
     const totalManualIncome = manualIncome.reduce(
   (sum, r) => sum + Number(r.amount || 0),
