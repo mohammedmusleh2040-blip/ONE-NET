@@ -29,22 +29,35 @@ export default function CashBoxReport() {
       .gte("expense_date", fromDate)
       .lte("expense_date", toDate);
 
-    setPayments(payRows);
-    setExpenses(expRows);
+    const manualIncome = expRows.filter(
+  (r) => r.direction === "income"
+);
 
+setPayments([
+  ...payRows,
+  ...manualIncome.map((r) => ({
+    id: `income-${r.id}`,
+    pay_date: r.expense_date,
+    amount: r.amount,
+    invoice_id: null,
+    note: r.category,
+  })),
+]);
+    setExpenses(expRows);
+    
     const totalPay = payRows.reduce(
       (sum, r) => sum + Number(r.amount || 0),
       0
     );
 
-    const BANK_CATEGORY = "ايداع البنك";
+    const BANK_CATEGORIES = [   "ايداع البنك",   "ايداع للبنك",   "ايداع في البنك",   "إيداع البنك", ];
 
 const bankRows = expRows.filter(
-  (e) => e.category === BANK_CATEGORY
+  (e) => BANK_CATEGORIES.includes(e.category)
 );
 
 const normalRows = expRows.filter(
-  (e) => e.category !== BANK_CATEGORY
+  (e) => !BANK_CATEGORIES.includes(e.category)
 );
 
     
@@ -59,7 +72,7 @@ const normalRows = expRows.filter(
       0
     );
 
-    setTotalPayments(totalPay);
+    setTotalPayments(totalPay + totalManualIncome);
     setBankDeposits(totalBank);
     setOperatingExpenses(totalNormal);
   }
