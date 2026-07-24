@@ -1183,6 +1183,10 @@ note: "[WRITEOFF] " + autoNote,
       if (invScope === "seller") arr = arr.filter((x) => !!x.seller_user_id);
       if (invScope === "admin") arr = arr.filter((x) => !x.seller_user_id);
     }
+    arr = arr.filter(inv => {
+  const note = String(inv.note || "");
+  return !(note.includes("[REFUNDED->]") || note.includes("[REFUNDED->"));
+});
     
     if (paymentFilter === "paid") arr = arr.filter(inv => safeNum(inv.remaining_amount) === 0);
     if (paymentFilter === "partial") arr = arr.filter(inv => safeNum(inv.paid_amount) > 0 && safeNum(inv.remaining_amount) > 0);
