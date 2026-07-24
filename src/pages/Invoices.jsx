@@ -31,6 +31,8 @@ function asPaidStatus(remaining) {
 function statusUi(inv) {
   const note = String(inv?.note || "");
   if (note.includes("[VOID]")) return { key: "void", ar: "ملغاة" };
+  if (note.includes("[REFUNDED->"))
+  return { key: "refund", ar: "مرتجع" };
   if (note.includes("[REFUND]")) return { key: "refund", ar: "مرتجع" };
 
   const paid = safeNum(inv.paid_amount);
