@@ -20,7 +20,8 @@ export default function CashBoxReport() {
   count,
   error,
 } = await supabase
-  .from("payments")
+  .from("payments") .select("id,pay_date,amount", { count: "exact" }) .order("pay_date", { ascending: true })
+      console.log(payRows.map(r => r.pay_date));
   .select("*", { count: "exact" })
   .neq("method", "from_balance")
   .not("note", "ilike", "%[WRITEOFF]%")
