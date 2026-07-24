@@ -49,6 +49,10 @@ setPayments([
       (sum, r) => sum + Number(r.amount || 0),
       0
     );
+    const totalManualIncome = manualIncome.reduce(
+  (sum, r) => sum + Number(r.amount || 0),
+  0
+);
 
     const BANK_CATEGORIES = [   "ايداع البنك",   "ايداع للبنك",   "ايداع في البنك",   "إيداع البنك", ];
 
