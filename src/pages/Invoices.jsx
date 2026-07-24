@@ -736,6 +736,14 @@ export default function Invoices() {
   .from("payments")
   .delete()
   .eq("invoice_id", invRow.id);
+      await supabase
+  .from("invoices")
+  .update({
+    paid_amount: 0,
+    remaining_amount: 0,
+    status: "refunded",
+  })
+  .eq("id", invRow.id);
 
       const refundCash = safeNum(invRow?.paid_amount);
       if (refundCash > 0) {
