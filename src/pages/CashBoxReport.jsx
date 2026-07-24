@@ -49,6 +49,8 @@ setPayments([
       (sum, r) => sum + Number(r.amount || 0),
       0
     );
+    console.log("payRows count =", payRows.length);
+console.log("totalPay =", totalPay);
     const totalManualIncome = manualIncome.reduce(
   (sum, r) => sum + Number(r.amount || 0),
   0
@@ -77,6 +79,7 @@ const normalRows = expRows.filter(
     );
 
     setTotalPayments(totalPay + totalManualIncome);
+    console.log("Displayed total =", totalPay + totalManualIncome);
     setBankDeposits(totalBank);
     setOperatingExpenses(totalNormal);
   }
