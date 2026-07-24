@@ -29,7 +29,9 @@ export default function CashBoxReport() {
   .lte("pay_date", toDate);
     
 console.log(payRows);
-    
+console.log(payRows);
+console.log("fromDate =", fromDate);
+console.log("toDate =", toDate);    
 console.log("Returned rows =", payRows.length);
 console.log("Count =", count);
 console.log("Error =", error);
