@@ -31,13 +31,6 @@ export default function CashBoxReport() {
   (p) => !(p.note || "").includes("[WRITEOFF]")
 );
     
-console.log(payRows);
-console.log(payRows);
-console.log("fromDate =", fromDate);
-console.log("toDate =", toDate);    
-console.log("Returned rows =", payRows.length);
-console.log("Count =", count);
-console.log("Error =", error);
 
     const { data: expRows = [] } = await supabase
       .from("expenses")
