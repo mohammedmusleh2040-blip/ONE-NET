@@ -263,7 +263,7 @@ export default function Payments() {
 
       return cn.includes(s) || invNo.includes(s) || invId.includes(s) || id.includes(s) || note.includes(s);
     });
-  }, [rows, q, customerId, method, custMap, invMap]);
+  }, [rows, q, customerId, method, hideWriteOff, custMap, invMap]);
 
   const totals = useMemo(() => {
     let inSum = 0,
