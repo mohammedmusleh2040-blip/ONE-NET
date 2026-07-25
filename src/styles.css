@@ -613,3 +613,19 @@ body.mobile-ui .nav-list{
   }
 
 }
+.print-totals{
+    margin-top:20px;
+    padding-top:12px;
+    border-top:2px solid #000;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    font-size:16px;
+    font-weight:bold;
+}
+
+@media print{
+    .print-totals{
+        page-break-inside:avoid;
+    }
+}
