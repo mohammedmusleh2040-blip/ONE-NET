@@ -568,3 +568,13 @@ body.mobile-ui .nav-list{
   table { width: 100% !important; border-collapse: collapse !important; }
   th, td { border: 1px solid #000 !important; padding: 6px !important; text-align: center !important; }
 }
+@media print {
+
+  aside,
+  nav,
+  .sidebar,
+  .no-print {
+    display: none !important;
+  }
+
+}
