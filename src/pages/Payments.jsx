@@ -602,6 +602,11 @@ async function deletePayment(id) {
               )}
             </tbody>
           </table>
+          <div className="print-totals">
+  <div>إجمالي القبض: {money(totals.inSum)}</div>
+  <div>إجمالي الصرف: {money(totals.outSum)}</div>
+  <div><strong>الصافي: {money(totals.net)}</strong></div>
+</div>
         </div>
       </div>
 
