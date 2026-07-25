@@ -578,3 +578,38 @@ body.mobile-ui .nav-list{
   }
 
 }
+@media print {
+
+  body{
+    zoom:75%;
+  }
+
+  .layout,
+  .app-layout,
+  .sidebar,
+  aside,
+  nav{
+    display:none !important;
+  }
+
+  main,
+  .content,
+  .page,
+  .card{
+    width:100% !important;
+    max-width:100% !important;
+    margin:0 !important;
+    padding:0 !important;
+    overflow:visible !important;
+  }
+
+  table{
+    width:100% !important;
+    font-size:11px !important;
+  }
+
+  tr{
+    page-break-inside:avoid;
+  }
+
+}
