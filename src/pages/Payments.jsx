@@ -71,6 +71,7 @@ export default function Payments() {
   const [to, setTo] = useState(todayISO());
   const [method, setMethod] = useState("all"); // all | cash | bank | other
   const [customerId, setCustomerId] = useState("all");
+  const [hideWriteOff, setHideWriteOff] = useState(false);
 
   // تحميل السندات حسب الفلاتر + حسب دور المستخدم
   useEffect(() => {
@@ -249,6 +250,7 @@ export default function Payments() {
     return (rows || []).filter((r) => {
       if (customerId !== "all" && String(r.customer_id) !== String(customerId)) return false;
       if (method !== "all" && String(r.method || "") !== method) return false;
+      if (hideWriteOff && String(r.note || "").includes("[WRITEOFF]")) return false;
 
       if (!s) return true;
 
@@ -478,6 +480,12 @@ async function deletePayment(id) {
           <button className="btn btn-outline" onClick={loadPayments} disabled={loading}>
             تحديث
           </button>
+          <button
+  className="btn btn-outline"
+  onClick={() => window.print()}
+>
+  🖨️ طباعة
+</button>
         </div>
       </div>
 
@@ -515,6 +523,21 @@ async function deletePayment(id) {
         </div>
 
         <div className="grid2" style={{ marginTop: 10 }}>
+          <label
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 24,
+  }}
+>
+  <input
+    type="checkbox"
+    checked={hideWriteOff}
+    onChange={(e) => setHideWriteOff(e.target.checked)}
+  />
+  إخفاء المسامحات
+</label>
           <label>
             بحث
             <input
