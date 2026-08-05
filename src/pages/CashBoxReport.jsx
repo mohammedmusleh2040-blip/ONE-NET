@@ -13,8 +13,33 @@ export default function CashBoxReport() {
   const [totalPayments, setTotalPayments] = useState(0);
   const [operatingExpenses, setOperatingExpenses] = useState(0);
   const [bankDeposits, setBankDeposits] = useState(0);
+  const [openingBalance, setOpeningBalance] = useState(0);
 
   async function loadReport() {
+    const { data: oldPayments = [] } = await supabase
+  .from("payments")
+  .select("amount")
+  .lt("pay_date", fromDate);
+
+const { data: oldExpenses = [] } = await supabase
+  .from("expenses")
+  .select("amount, category")
+  .lt("expense_date", fromDate);
+
+const oldPay = oldPayments.reduce(
+  (s, r) => s + Number(r.amount || 0),
+  0
+);
+
+const oldBank = oldExpenses
+  .filter((r) => r.category === "ايداع البنك")
+  .reduce((s, r) => s + Number(r.amount || 0), 0);
+
+const oldNormal = oldExpenses
+  .filter((r) => r.category !== "ايداع البنك")
+  .reduce((s, r) => s + Number(r.amount || 0), 0);
+
+setOpeningBalance(oldPay - oldBank - oldNormal);
     const {
   data: payRows = [],
   count,
@@ -98,9 +123,10 @@ const normalRows = expRows.filter(
   }, [fromDate, toDate]);
 
   const cashBalance =
-    totalPayments -
-    operatingExpenses -
-    bankDeposits;
+  openingBalance +
+  totalPayments -
+  operatingExpenses -
+  bankDeposits;
 
   return (
     <>
@@ -183,6 +209,10 @@ const normalRows = expRows.filter(
 
         <table>
           <tbody>
+            <tr>
+  <td>رصيد أول المدة</td>
+  <td>{openingBalance.toLocaleString()}</td>
+</tr>
             <tr>
               <td>إجمالي سندات القبض</td>
               <td>
