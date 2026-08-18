@@ -78,14 +78,73 @@ export default function Stock() {
   };
 
   const [logFilter, setLogFilter] = useState("ALL"); // ALL | IN | OUT | DELETE
+
+  // ====== Search + Date Range for Movement Log
+  const [movementSearch, setMovementSearch] = useState("");
+  const [movementFrom, setMovementFrom] = useState("");
+  const [movementTo, setMovementTo] = useState("");
+
   const filteredMovements = useMemo(() => {
+    const search = movementSearch.trim().toLowerCase();
+
     return (movements || []).filter((m) => {
-      if (logFilter === "ALL") return true;
-      if (logFilter === "DELETE")
-        return (m.note || "").includes("حذف") || (m.note || "").includes("تصحيح");
-      return m.movement_type === logFilter;
+      // نوع الحركة
+      if (logFilter === "DELETE") {
+        if (
+          !String(m.note || "").includes("حذف") &&
+          !String(m.note || "").includes("تصحيح")
+        ) {
+          return false;
+        }
+      } else if (logFilter !== "ALL" && m.movement_type !== logFilter) {
+        return false;
+      }
+
+      // البحث النصي: اسم الكرت / الملاحظة / رقم الفاتورة / المرجع / رقم الحركة
+      if (search) {
+        const searchable = [
+          m.card_name,
+          m.card,
+          m.name,
+          m.note,
+          m.notes,
+          m.invoice_id,
+          m.ref_id,
+          m.ref_type,
+          m.movement_type,
+          m.op_type,
+          m.operation_type,
+          m.id,
+        ]
+          .filter((v) => v !== null && v !== undefined)
+          .join(" ")
+          .toLowerCase();
+
+        if (!searchable.includes(search)) return false;
+      }
+
+      // الفترة: من تاريخ إلى تاريخ
+      const rawDate =
+        m.movement_date ||
+        m.date ||
+        m.invoice_datetime ||
+        m.created_at ||
+        "";
+
+      const day = String(rawDate).slice(0, 10);
+
+      if (movementFrom && (!day || day < movementFrom)) return false;
+      if (movementTo && (!day || day > movementTo)) return false;
+
+      return true;
     });
-  }, [movements, logFilter]);
+  }, [
+    movements,
+    logFilter,
+    movementSearch,
+    movementFrom,
+    movementTo,
+  ]);
 
   // ====== Edit Modal
   const [editOpen, setEditOpen] = useState(false);
@@ -1012,6 +1071,65 @@ async function applyMovement() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div className="badge" style={{ fontSize: 13 }}>📜 سجل حركة الكروت</div>
                 <div className="badge">{filteredMovements.length} حركة</div>
+              </div>
+
+              {/* ===== البحث وتحديد فترة السجل ===== */}
+              <div
+                className="row"
+                style={{
+                  marginTop: 12,
+                  alignItems: "flex-end",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div className="col" style={{ minWidth: 280 }}>
+                  <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                    🔎 بحث في السجل
+                  </label>
+                  <input
+                    className="input"
+                    value={movementSearch}
+                    onChange={(e) => setMovementSearch(e.target.value)}
+                    placeholder="اسم الكرت، الملاحظة، رقم الفاتورة، المرجع..."
+                  />
+                </div>
+
+                <div className="col" style={{ maxWidth: 210 }}>
+                  <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                    📅 من تاريخ
+                  </label>
+                  <input
+                    className="input"
+                    type="date"
+                    value={movementFrom}
+                    onChange={(e) => setMovementFrom(e.target.value)}
+                  />
+                </div>
+
+                <div className="col" style={{ maxWidth: 210 }}>
+                  <label style={{ fontSize: 12, color: "var(--muted)" }}>
+                    📅 إلى تاريخ
+                  </label>
+                  <input
+                    className="input"
+                    type="date"
+                    value={movementTo}
+                    onChange={(e) => setMovementTo(e.target.value)}
+                  />
+                </div>
+
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={() => {
+                    setMovementSearch("");
+                    setMovementFrom("");
+                    setMovementTo("");
+                  }}
+                >
+                  مسح البحث
+                </button>
               </div>
 
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
