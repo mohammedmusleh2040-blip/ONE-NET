@@ -804,6 +804,8 @@ export default function Invoices() {
         line_total: -(safeNum(li.refund_qty) * safeNum(li.price) * (1 - discountRate)),
         line_kind: li.line_kind,
       }));
+      // The database trigger is the single source of truth for admin stock movement.
+      // Inserting the refund line creates exactly one IN movement for the returned qty.
       const { error: lineErr } = await supabase.from("invoice_line_items").insert(refundLines);
       if (lineErr) throw lineErr;
 
@@ -821,13 +823,10 @@ export default function Invoices() {
             movement_date: partialRefundDate,
           });
         } else {
-          await rpcCardMove({
-            card_type_id: li.card_type_id,
-            movement_type: "IN",
-            qty,
-            noteText: `مرتجع جزئي ${refundNo} للفاتورة ${invRow.number || invRow.id}`,
-            movement_date: partialRefundDate,
-          });
+          // IMPORTANT: For admin stock, inserting the refund invoice line already
+          // creates the single IN movement through the database trigger/RPC.
+          // Do NOT call rpcCardMove here, otherwise the same returned quantity
+          // is added twice (the bug that caused 42 -> 56 instead of 49).
         }
       }
 
