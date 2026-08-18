@@ -295,10 +295,23 @@ export default function Stock() {
         }));
       } else {
         // normalize name field
-        movementsRows = movementsRows.map((r) => ({
-          ...r,
-          card_type_name: r.card_type_name || r.card_name || r.name || typeNameById.get(String(r.card_type_id)) || null,
-        }));
+        movementsRows = movementsRows.map((r) => {
+          const cardName =
+            r.card_name ||
+            r.card_type_name ||
+            r.name ||
+            r.card ||
+            typeNameById.get(String(r.card_type_id)) ||
+            null;
+
+          return {
+            ...r,
+            // توحيد اسم الكرت حتى يظهر في السجل حتى لو الـ View يستخدم card_type_name
+            card_name: cardName,
+            card_type_name: cardName,
+            name: cardName,
+          };
+        });
       }
 
       setMovements(movementsRows || []);
@@ -1167,7 +1180,7 @@ async function applyMovement() {
                     {filteredMovements.map((m, idx) => (
                       <tr key={m.id} style={{ background: rowBg(m.note) }}>
       <td>{idx + 1}</td>
-      <td>{m.card_name || m.card || "-"}</td>
+      <td>{m.card_name || m.card_type_name || m.name || m.card || "-"}</td>
       <td style={{ fontWeight: 800 }}>{(m.movement_type || "").toUpperCase()}</td>
       <td style={{ fontWeight: 800 }}>
         {m.movement_type === "IN" ? "+" : "-"} {safeNum(m.qty)}
