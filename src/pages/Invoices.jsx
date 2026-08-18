@@ -168,6 +168,7 @@ export default function Invoices() {
   const [partialRefundInvoice, setPartialRefundInvoice] = useState(null);
   const [partialRefundLines, setPartialRefundLines] = useState([]);
   const [partialRefundSaving, setPartialRefundSaving] = useState(false);
+  const [partialRefundDate, setPartialRefundDate] = useState("");
 
   const didInit = useRef(false);
 
@@ -729,6 +730,7 @@ export default function Invoices() {
       if (!lines?.length) return showToast("لا توجد بنود يمكن إرجاعها", "warn");
 
       setPartialRefundInvoice(invRow);
+      setPartialRefundDate("");
       setPartialRefundLines(lines.map((li) => ({
         ...li,
         refund_qty: 0,
@@ -747,6 +749,7 @@ export default function Invoices() {
     if (!partialRefundInvoice?.id || partialRefundSaving) return;
     const selected = (partialRefundLines || []).filter((li) => safeNum(li.refund_qty) > 0);
     if (!selected.length) return showToast("أدخل كمية المرتجع أولاً", "warn");
+    if (!partialRefundDate) return showToast("اختر تاريخ المرتجع أولاً", "warn");
 
     for (const li of selected) {
       if (safeNum(li.refund_qty) > safeNum(li.max_qty)) {
@@ -769,7 +772,7 @@ export default function Invoices() {
         .insert([{
           customer_id: invRow.customer_id,
           invoice_type: invRow.invoice_type,
-          invoice_date: todayISO(),
+          invoice_date: partialRefundDate,
           total_before_discount: -refundTotal,
           discount_percent: 0,
           discount_value: 0,
@@ -815,7 +818,7 @@ export default function Invoices() {
             movement_type: "IN",
             ref_id: refundId,
             invoice_id: refundId,
-            movement_date: todayISO(),
+            movement_date: partialRefundDate,
           });
         } else {
           await rpcCardMove({
@@ -823,7 +826,7 @@ export default function Invoices() {
             movement_type: "IN",
             qty,
             noteText: `مرتجع جزئي ${refundNo} للفاتورة ${invRow.number || invRow.id}`,
-            movement_date: todayISO(),
+            movement_date: partialRefundDate,
           });
         }
       }
@@ -1683,6 +1686,20 @@ style={{
         <div style={styles.modalBack}>
           <div style={{ ...styles.modal, width: "min(850px, 96vw)" }}>
             <h3 style={{ marginTop: 0 }}>مرتجع جزئي — فاتورة #{partialRefundInvoice?.number || partialRefundInvoice?.id}</h3>
+            <div style={{ marginBottom: 14, padding: 12, border: "2px solid #35cfa8", borderRadius: 12, background: "rgba(53, 207, 168, 0.08)" }}>
+              <label style={{ ...styles.label, display: "block", fontWeight: 800 }}>
+                📅 تاريخ المرتجع (أدخله يدويًا) *
+                <input
+                  type="date"
+                  value={partialRefundDate}
+                  onChange={(e) => setPartialRefundDate(e.target.value)}
+                  style={{ ...styles.input, marginTop: 6, fontSize: 16, fontWeight: 700 }}
+                  required
+                />
+              </label>
+              <div style={{ marginTop: 5, fontSize: 12, opacity: 0.75 }}>مثال: إذا كان المرتجع بتاريخ 17/08، اختر 17/08 هنا قبل التأكيد.</div>
+            </div>
+
             <div style={styles.payHint}>
               اختر فقط الكمية التي رجعها العميل. الفاتورة الأصلية والسداد الأصلي <b>لن يتم إلغاؤهما</b>.
             </div>
@@ -1731,7 +1748,7 @@ style={{
               <button onClick={savePartialRefund} style={styles.btnPrimary} disabled={partialRefundSaving}>
                 {partialRefundSaving ? "جاري الحفظ..." : "تأكيد المرتجع الجزئي"}
               </button>
-              <button onClick={() => { setPartialRefundOpen(false); setPartialRefundInvoice(null); setPartialRefundLines([]); }} style={styles.btnGhost}>إلغاء</button>
+              <button onClick={() => { setPartialRefundOpen(false); setPartialRefundInvoice(null); setPartialRefundLines([]); setPartialRefundDate(""); }} style={styles.btnGhost}>إلغاء</button>
             </div>
           </div>
         </div>
