@@ -163,6 +163,12 @@ export default function Invoices() {
   const [payNote, setPayNote] = useState("");
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 16));
 
+  // ===== Partial refund =====
+  const [partialRefundOpen, setPartialRefundOpen] = useState(false);
+  const [partialRefundInvoice, setPartialRefundInvoice] = useState(null);
+  const [partialRefundLines, setPartialRefundLines] = useState([]);
+  const [partialRefundSaving, setPartialRefundSaving] = useState(false);
+
   const didInit = useRef(false);
 
   // ===== Derived =====
@@ -708,6 +714,139 @@ export default function Invoices() {
       showToast("فشل إلغاء الفاتورة", "err");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function openPartialRefund(invRow) {
+    if (!invRow?.id) return;
+    try {
+      setLoading(true);
+      const { data: lines, error } = await supabase
+        .from("invoice_line_items")
+        .select("*")
+        .eq("invoice_id", invRow.id);
+      if (error) throw error;
+      if (!lines?.length) return showToast("لا توجد بنود يمكن إرجاعها", "warn");
+
+      setPartialRefundInvoice(invRow);
+      setPartialRefundLines(lines.map((li) => ({
+        ...li,
+        refund_qty: 0,
+        max_qty: safeNum(li.qty),
+      })));
+      setPartialRefundOpen(true);
+    } catch (e) {
+      console.error(e);
+      showToast("فشل فتح المرتجع الجزئي", "err");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function savePartialRefund() {
+    if (!partialRefundInvoice?.id || partialRefundSaving) return;
+    const selected = (partialRefundLines || []).filter((li) => safeNum(li.refund_qty) > 0);
+    if (!selected.length) return showToast("أدخل كمية المرتجع أولاً", "warn");
+
+    for (const li of selected) {
+      if (safeNum(li.refund_qty) > safeNum(li.max_qty)) {
+        return showToast(`كمية المرتجع أكبر من المباع للصنف: ${li.card_name || li.name || li.card_type_id}`, "warn");
+      }
+    }
+
+    setPartialRefundSaving(true);
+    setLoading(true);
+    try {
+      const invRow = partialRefundInvoice;
+      const discountRate = Math.max(0, Math.min(100, safeNum(invRow.discount_percent))) / 100;
+      const refundTotal = selected.reduce((sum, li) => {
+        const gross = safeNum(li.refund_qty) * safeNum(li.price);
+        return sum + (gross * (1 - discountRate));
+      }, 0);
+
+      const { data: refundInv, error: refundErr } = await supabase
+        .from("invoices")
+        .insert([{
+          customer_id: invRow.customer_id,
+          invoice_type: invRow.invoice_type,
+          invoice_date: todayISO(),
+          total_before_discount: -refundTotal,
+          discount_percent: 0,
+          discount_value: 0,
+          total_after_discount: -refundTotal,
+          paid_amount: 0,
+          remaining_amount: 0,
+          status: "paid",
+          note: `[PARTIAL_REFUND] مرتجع جزئي للفاتورة ${invRow.number || invRow.id}`,
+          is_refund: true,
+          refund_of_invoice_id: invRow.id,
+        }])
+        .select("id")
+        .single();
+
+      if (refundErr) throw refundErr;
+      const refundId = refundInv?.id;
+      const refundNo = `REF-${String(refundId).padStart(6, "0")}`;
+      await supabase.from("invoices").update({ number: refundNo }).eq("id", refundId);
+
+      const refundLines = selected.map((li) => ({
+        invoice_id: refundId,
+        card_type_id: li.card_type_id,
+        qty: safeNum(li.refund_qty),
+        price: safeNum(li.price),
+        prev_reading_gb: li.prev_reading_gb,
+        curr_reading_gb: li.curr_reading_gb,
+        usage_gb: li.usage_gb ? -Math.abs(safeNum(li.usage_gb)) : null,
+        price_per_gb: li.price_per_gb,
+        line_total: -(safeNum(li.refund_qty) * safeNum(li.price) * (1 - discountRate)),
+        line_kind: li.line_kind,
+      }));
+      const { error: lineErr } = await supabase.from("invoice_line_items").insert(refundLines);
+      if (lineErr) throw lineErr;
+
+      // Restore only the returned quantities to stock.
+      for (const li of selected) {
+        const qty = safeNum(li.refund_qty);
+        if (invRow.seller_user_id) {
+          await rpcVendorMove({
+            card_type_id: li.card_type_id,
+            qty,
+            noteText: `مرتجع جزئي ${refundNo} للفاتورة ${invRow.number || invRow.id}`,
+            movement_type: "IN",
+            ref_id: refundId,
+            invoice_id: refundId,
+            movement_date: todayISO(),
+          });
+        } else {
+          await rpcCardMove({
+            card_type_id: li.card_type_id,
+            movement_type: "IN",
+            qty,
+            noteText: `مرتجع جزئي ${refundNo} للفاتورة ${invRow.number || invRow.id}`,
+            movement_date: todayISO(),
+          });
+        }
+      }
+
+      const oldNote = String(invRow.note || "");
+      const tag = `[PARTIAL_REFUNDED->${refundNo}]`;
+      await supabase.from("invoices").update({
+        note: oldNote ? `${oldNote}\n${tag}` : tag,
+      }).eq("id", invRow.id);
+
+      await loadCardBalances();
+      await loadVendorStock();
+      await loadInvoices();
+      setPartialRefundOpen(false);
+      setPartialRefundInvoice(null);
+      setPartialRefundLines([]);
+      showToast(`تم إنشاء المرتجع الجزئي ${refundNo} بقيمة ${money(refundTotal)} ريال`, "ok");
+    } catch (e) {
+      console.error(e);
+      showToast(e?.message || "فشل إنشاء المرتجع الجزئي", "err");
+    } finally {
+      setLoading(false);
+      setPartialRefundSaving(false);
     }
   }
 
@@ -1501,7 +1640,12 @@ style={{
                             <button onClick={() => printSavedInvoice(inv)} style={styles.btn}>طباعة</button>
                             <button onClick={() => openPay(inv)} style={styles.btnPrimary} disabled={isClosed}>سداد</button>
                             {canEditInvoice && <button onClick={() => startEdit(inv)} style={styles.btn}>تعديل</button>}
-                            {canRefundInvoice && canRefundThis(inv) && <button onClick={() => refundInvoice(inv)} style={styles.btnWarn}>مرتجع</button>}
+                            {canRefundInvoice && canRefundThis(inv) && (
+                              <>
+                                <button onClick={() => openPartialRefund(inv)} style={styles.btnWarn}>مرتجع جزئي</button>
+                                <button onClick={() => refundInvoice(inv)} style={styles.btnWarn}>مرتجع كامل</button>
+                              </>
+                            )}
                             {canDeleteInvoice && <button onClick={() => deleteInvoice(inv)} style={styles.btnDanger}>حذف</button>}
                           </div>
                         </td>
@@ -1531,6 +1675,64 @@ style={{
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {partialRefundOpen && (
+        <div style={styles.modalBack}>
+          <div style={{ ...styles.modal, width: "min(850px, 96vw)" }}>
+            <h3 style={{ marginTop: 0 }}>مرتجع جزئي — فاتورة #{partialRefundInvoice?.number || partialRefundInvoice?.id}</h3>
+            <div style={styles.payHint}>
+              اختر فقط الكمية التي رجعها العميل. الفاتورة الأصلية والسداد الأصلي <b>لن يتم إلغاؤهما</b>.
+            </div>
+
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr><th>الصنف</th><th>المباع</th><th>السعر</th><th>المرتجع</th><th>قيمة المرتجع</th></tr>
+                </thead>
+                <tbody>
+                  {partialRefundLines.map((li, idx) => {
+                    const q = Math.min(safeNum(li.max_qty), Math.max(0, safeNum(li.refund_qty)));
+                    const rate = 1 - (Math.max(0, Math.min(100, safeNum(partialRefundInvoice?.discount_percent))) / 100);
+                    const value = q * safeNum(li.price) * rate;
+                    return (
+                      <tr key={li.id || idx}>
+                        <td>{li.card_name || li.name || `كرت ${li.card_type_id}`}</td>
+                        <td>{li.max_qty}</td>
+                        <td>{money(li.price)}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min="0"
+                            max={li.max_qty}
+                            value={li.refund_qty}
+                            onChange={(e) => {
+                              const val = Math.min(safeNum(li.max_qty), Math.max(0, safeNum(e.target.value)));
+                              setPartialRefundLines((prev) => prev.map((x, i) => i === idx ? { ...x, refund_qty: val } : x));
+                            }}
+                            style={{ ...styles.input, minWidth: 100 }}
+                          />
+                        </td>
+                        <td><b>{money(value)}</b></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ ...styles.summaryRow, marginTop: 12 }}>
+              <div style={styles.sumChip}>إجمالي المرتجع: <b>{money((partialRefundLines || []).reduce((s, li) => { const r = 1 - (Math.max(0, Math.min(100, safeNum(partialRefundInvoice?.discount_percent))) / 100); return s + safeNum(li.refund_qty) * safeNum(li.price) * r; }, 0))} ريال</b></div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "end", marginTop: 15 }}>
+              <button onClick={savePartialRefund} style={styles.btnPrimary} disabled={partialRefundSaving}>
+                {partialRefundSaving ? "جاري الحفظ..." : "تأكيد المرتجع الجزئي"}
+              </button>
+              <button onClick={() => { setPartialRefundOpen(false); setPartialRefundInvoice(null); setPartialRefundLines([]); }} style={styles.btnGhost}>إلغاء</button>
+            </div>
           </div>
         </div>
       )}
