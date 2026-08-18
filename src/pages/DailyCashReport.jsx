@@ -284,6 +284,7 @@ export default function DailyCashReport() {
               <tr>
                 <th>التاريخ</th>
                 <th>البند</th>
+                <th>الملاحظات</th>
                 <th>المبلغ</th>
               </tr>
             </thead>
@@ -292,6 +293,7 @@ export default function DailyCashReport() {
                 <tr key={e.id}>
                   <td>{e.expense_date}</td>
                   <td>{e.category}</td>
+                  <td>{e.note || "-"}</td>
                   <td>{Number(e.amount).toLocaleString()}</td>
                 </tr>
               ))}
