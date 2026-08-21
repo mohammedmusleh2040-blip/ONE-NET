@@ -36,11 +36,14 @@ export default function OneNetAssistant() {
 
     try {
       const { data, error } = await supabase.functions.invoke(
-        FUNCTION_NAME,
-        {
-          body,
-        },
-      );
+  FUNCTION_NAME,
+  {
+    body,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  },
+);
 
       if (error) {
         throw new Error(error.message || "فشل الاتصال بالمساعد");
