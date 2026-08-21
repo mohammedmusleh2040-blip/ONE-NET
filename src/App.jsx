@@ -22,6 +22,9 @@ import EmployeeAdvances from "./pages/EmployeeAdvances";
 import EmployeeStatement from "./pages/EmployeeStatement";
 import Login from "./pages/Login";
 
+// OneNet Assistant
+import OneNetAssistant from "./pages/OneNetAssistant";
+
 export default function App() {
   return (
     <Routes>
@@ -33,32 +36,69 @@ export default function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
 
         <Route path="dashboard" element={<Dashboard />} />
+
         <Route path="stock" element={<Stock />} />
+
         <Route path="customers" element={<Customers />} />
+
         <Route path="invoices" element={<Invoices />} />
+
+        {/* OneNet Assistant */}
+        <Route
+          path="assistant"
+          element={<OneNetAssistant />}
+        />
+
         <Route path="payments" element={<Payments />} />
+
         <Route path="expenses" element={<Expenses />} />
+
         <Route path="ledger" element={<Ledger />} />
 
         {/* تقرير اليومية الجديد */}
-        <Route path="daily-report" element={<DailyCashReport />} />
+        <Route
+          path="daily-report"
+          element={<DailyCashReport />}
+        />
 
         <Route path="users" element={<Users />} />
+
         <Route path="settings" element={<Settings />} />
+
         <Route path="vendors" element={<Vendors />} />
+
         <Route path="employees" element={<Employees />} />
+
         <Route path="payroll" element={<Payroll />} />
-        <Route path="salary-report" element={<SalaryReport />} />
-<Route path="employee-advances" element={<EmployeeAdvances />} />
-<Route path="employee-statement" element={<EmployeeStatement />} />
-        <Route path="/vendors" element={<Vendors />} />
+
         <Route
-  path="cashbox"
-  element={<CashBoxReport />}
-/>
+          path="salary-report"
+          element={<SalaryReport />}
+        />
+
+        <Route
+          path="employee-advances"
+          element={<EmployeeAdvances />}
+        />
+
+        <Route
+          path="employee-statement"
+          element={<EmployeeStatement />}
+        />
+
+        {/* موجود سابقًا - أبقيته كما هو */}
+        <Route path="/vendors" element={<Vendors />} />
+
+        <Route
+          path="cashbox"
+          element={<CashBoxReport />}
+        />
 
         {/* fallback */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route
+          path="*"
+          element={<Navigate to="/dashboard" replace />}
+        />
       </Route>
     </Routes>
   );
